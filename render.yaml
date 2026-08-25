@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: inchframe-studio
+    runtime: node
+    plan: starter
+    region: oregon
+    numInstances: 1
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://studio.inchframe.com
+      - key: DATABASE_PATH
+        value: /var/data/inchframe-studio.sqlite
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        value: info@inchframe.com
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: CLIENT_SIGNUP_CODE
+        sync: false
+    disk:
+      name: inchframe-studio-data
+      mountPath: /var/data
+      sizeGB: 1

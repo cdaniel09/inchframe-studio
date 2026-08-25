@@ -1,2 +1,5 @@
 import Link from 'next/link';
-export function SiteHeader({portal=false}:{portal?:boolean}){return <header className="site-nav"><div className="shell nav-inner"><Link className="wordmark" href="/" aria-label="Inchframe Studio home"><span>INCHFRAME</span><b>STUDIO</b></Link>{portal?<nav className="nav-links"><Link href="/portal">Projects</Link><Link href="/start">New project</Link></nav>:<nav className="nav-links"><a href="/#services">Services</a><a href="/#process">Process</a><a href="/#work">Work</a></nav>}<Link className="button button-small button-outline" href={portal?'/':'/portal'}>{portal?'Studio site':'Client area'}</Link></div></header>}
+
+export function SiteHeader({portal=false}:{portal?:boolean}) {
+  return <header className="site-nav"><div className="shell nav-inner"><Link className="wordmark" href="/" aria-label="Inchframe Studio home"><span>INCHFRAME</span><b>STUDIO</b></Link>{portal?<nav className="nav-links"><Link href="/portal">Projects</Link><Link href="/start">New project</Link></nav>:<nav className="nav-links"><Link href="/#services">Services</Link><Link href="/#process">Process</Link><Link href="/#work">Work</Link></nav>}<Link className="button button-small button-outline" href={portal?'/':'/portal'}>{portal?'Studio site':'Client area'}</Link></div></header>;
+}
