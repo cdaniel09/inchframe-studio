@@ -1,0 +1,20 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import { requireChatGPTUser } from '@/app/chatgpt-auth';
+import { PortalHeader } from '@/components/PortalHeader';
+import { isStudioAdmin,listAdminProjectOperations } from '@/lib/data';
+import { shortDate,titleCase } from '@/lib/format';
+
+export const dynamic='force-dynamic';
+export const metadata:Metadata={title:'Production operations'};
+
+export default async function OperationsPage(){
+  const user=await requireChatGPTUser('/portal/operations');if(!isStudioAdmin(user))notFound();
+  const projects=await listAdminProjectOperations(user),today=new Date().toISOString().slice(0,10);
+  const totals={admin:projects.reduce((sum,item)=>sum+item.admin_actions,0),actions:projects.reduce((sum,item)=>sum+item.open_actions,0),blockers:projects.reduce((sum,item)=>sum+item.blockers,0),reviews:projects.reduce((sum,item)=>sum+item.pending_reviews,0)};
+  return <main className="portal-page"><PortalHeader user={user}/><section className="portal-head operations-head"><div className="shell portal-title-row"><div><p className="eyebrow"><span>●</span> Studio admin only</p><h1>Production operations</h1><p>Cross-project action items, blockers, agreement status, reviews, deadlines, and recent activity.</p></div><Link className="button button-outline" href="/portal">All projects</Link></div></section><section className="portal-content"><div className="shell">
+    <div className="operations-stats"><div><span>Admin actions</span><strong>{totals.admin}</strong></div><div><span>All open actions</span><strong>{totals.actions}</strong></div><div><span>Blockers</span><strong>{totals.blockers}</strong></div><div><span>Reviews waiting</span><strong>{totals.reviews}</strong></div></div>
+    {projects.length===0?<div className="empty-state"><span>00</span><h2>No projects yet.</h2></div>:<div className="operations-list">{projects.map(project=>{const target=project.agreement_target_date||project.due_date,overdue=Boolean(target&&target<today&&!['final_delivery_accepted','declined'].includes(project.project_status));const flags=[project.admin_actions?`${project.admin_actions} admin action${project.admin_actions===1?'':'s'}`:'',project.open_actions?`${project.open_actions} total open action${project.open_actions===1?'':'s'}`:'',project.blockers?`${project.blockers} blocker${project.blockers===1?'':'s'}`:'',project.pending_reviews?`${project.pending_reviews} review file${project.pending_reviews===1?'':'s'}`:'',project.agreement_status?`Agreement: ${titleCase(project.agreement_status)}`:'Agreement not started',overdue?'Past target date':''].filter(Boolean);return <article className={`operations-row ${overdue||project.blockers||project.admin_actions?'attention':''}`} key={project.project_id}><div className="operations-main"><div><span>{titleCase(project.project_type)} · {titleCase(project.project_status)}</span><h2><Link href={`/portal/projects/${project.project_id}`}>{project.title}</Link></h2><p>{project.creator_name||'Creator not assigned'} · {project.owner_email}</p>{project.latest_activity_title&&<p className="operations-latest"><strong>Latest {titleCase(project.latest_activity_kind||'message')}:</strong> {project.latest_activity_title}</p>}</div><div className="operations-date"><span>Target</span><strong>{shortDate(target)}</strong><small>Last activity {shortDate(project.latest_activity_at||project.updated_at)}</small></div></div><div className="operations-flags">{flags.map(flag=><span className={flag.includes('admin action')||flag.includes('blocker')||flag.includes('Past')?'warn':''} key={flag}>{flag}</span>)}</div><Link className="mini-button" href={`/portal/projects/${project.project_id}`}>Open project →</Link></article>})}</div>}
+  </div></section></main>;
+}

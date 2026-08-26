@@ -11,6 +11,9 @@ The Inchframe Studio sales site and private client production portal. It runs as
 5. Quotes below the platform/creator minimum are rejected automatically. High-value or rush quotes receive an admin exception check, but the admin does not set the price.
 6. An accepted quote opens Stripe Checkout for the required project payment: full payment below $500, 50% from $500–$999, and 40% at $1,000+.
 7. A signed Stripe webhook records payment, locks the creator assignment, and opens the advanced questionnaire, media, review, and delivery workspace.
+8. The assigned creator drafts a versioned production agreement covering the goal, scope, work product, exclusions, dates, milestones, revisions, responsibilities, communication, change control, and final delivery. The client accepts it or requests a recorded amendment before production proceeds.
+9. Client, creator, and Studio use the project activity log for messages, progress, milestones, decisions, blockers, delivery notices, next steps, due dates, and assigned action items. Material conversations outside Studio must be summarized in the log.
+10. The client reviews files in place. Accepting a final deliverable records final acceptance, completes the production agreement, and closes delivery action items.
 
 The older one-time access-code flow remains available to the admin as a manual exception for legacy inquiries.
 
@@ -50,6 +53,7 @@ After the service is live, add `studio.inchframe.com` as a custom domain and poi
 - Admin: `/login` with `ADMIN_EMAIL` and the password used to create `ADMIN_PASSWORD_HASH`.
 - Clients: `/register`, email verification, then `/login`.
 - Portal: `/portal`.
+- Admin operations: `/portal/operations` aggregates all project agreements, action items, blockers, pending reviews, deadlines, and recent activity.
 
 This single-instance disk design keeps initial cost and operations low. Move the database to managed Postgres and files to object storage before scaling to multiple instances.
 

@@ -15,12 +15,16 @@ export type StudioProject = {
 };
 export type StudioAsset = {id:string;project_id:string;uploaded_by_id:string;uploaded_by_email:string;kind:string;object_key:string;filename:string;mime_type:string;byte_size:number;label:string;version:number;status:string;created_at:string};
 export type StudioComment = {id:string;project_id:string;asset_id:string|null;author_id:string;author_email:string;body:string;created_at:string};
+export type StudioDecision = {id:string;project_id:string;asset_id:string;author_id:string;author_email:string;decision:'approved'|'changes_requested';note:string;created_at:string};
 export type StudioAccount = {id:string;email:string;display_name:string;password_hash:string;role:'client';email_verified_at:string|null;verification_token_hash:string|null;verification_expires_at:string|null;created_at:string};
 export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
 export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
 export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
 export type QuoteOffer={id:string;quote_id:string;actor_id:string;actor_role:'creator'|'client';amount_cents:number;note:string;created_at:string};
 export type ProjectQuoteBundle={quote:ProjectQuote;offers:QuoteOffer[];creator:CreatorProfile};
+export type ProjectAgreement={id:string;project_id:string;version:number;status:'draft'|'pending_client'|'changes_requested'|'active'|'completed';goal:string;scope:string;deliverables:string;out_of_scope:string;start_date:string|null;target_date:string|null;milestones:string;revision_rounds:number;communication_method:string;response_expectation:string;client_responsibilities:string;creator_responsibilities:string;final_delivery:string;change_policy:string;creator_accepted_at:string|null;client_accepted_at:string|null;completed_at:string|null;updated_by_id:string;created_at:string;updated_at:string};
+export type ProjectActivity={id:string;project_id:string;author_id:string;author_email:string;author_role:'creator'|'client'|'admin';kind:'message'|'progress'|'milestone'|'decision'|'blocker'|'delivery';title:string;body:string;next_step:string;needs_response_from:'none'|'creator'|'client'|'admin';target_date:string|null;resolved_at:string|null;resolved_by_id:string|null;created_at:string};
+export type AdminProjectOperation={project_id:string;title:string;project_type:string;project_status:string;owner_email:string;due_date:string|null;updated_at:string;creator_name:string|null;agreement_status:ProjectAgreement['status']|null;agreement_target_date:string|null;admin_actions:number;open_actions:number;blockers:number;pending_reviews:number;latest_activity_at:string|null;latest_activity_title:string|null;latest_activity_kind:ProjectActivity['kind']|null};
 
 const globalForStudio = globalThis as typeof globalThis & {inchframeStudioDb?: DatabaseSync; inchframeSchemaReady?: boolean};
 
@@ -134,6 +138,27 @@ export async function ensureSchema() {
       note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
       FOREIGN KEY(quote_id) REFERENCES project_quotes(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS project_agreements (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','pending_client','changes_requested','active','completed')),
+      goal TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '', deliverables TEXT NOT NULL DEFAULT '', out_of_scope TEXT NOT NULL DEFAULT '',
+      start_date TEXT, target_date TEXT, milestones TEXT NOT NULL DEFAULT '', revision_rounds INTEGER NOT NULL DEFAULT 1,
+      communication_method TEXT NOT NULL DEFAULT 'Inchframe Studio project workspace', response_expectation TEXT NOT NULL DEFAULT 'Respond within two business days',
+      client_responsibilities TEXT NOT NULL DEFAULT '', creator_responsibilities TEXT NOT NULL DEFAULT '', final_delivery TEXT NOT NULL DEFAULT '',
+      change_policy TEXT NOT NULL DEFAULT 'Changes outside the agreed scope require a written change request and may change price or timing.',
+      creator_accepted_at TEXT, client_accepted_at TEXT, completed_at TEXT, updated_by_id TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS project_activity (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, author_id TEXT NOT NULL, author_email TEXT NOT NULL,
+      author_role TEXT NOT NULL CHECK(author_role IN ('creator','client','admin')),
+      kind TEXT NOT NULL CHECK(kind IN ('message','progress','milestone','decision','blocker','delivery')),
+      title TEXT NOT NULL, body TEXT NOT NULL, next_step TEXT NOT NULL DEFAULT '',
+      needs_response_from TEXT NOT NULL DEFAULT 'none' CHECK(needs_response_from IN ('none','creator','client','admin')),
+      target_date TEXT, resolved_at TEXT, resolved_by_id TEXT, created_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
   `);
 
   const userColumns=columns('users');
@@ -176,6 +201,9 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_projects_assigned_creator ON projects(assigned_creator_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_project_quotes_creator_status ON project_quotes(creator_id, status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_quote_offers_quote_created ON quote_offers(quote_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_project_agreements_status_target ON project_agreements(status, target_date);
+    CREATE INDEX IF NOT EXISTS idx_project_activity_project_created ON project_activity(project_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_project_activity_actions ON project_activity(needs_response_from, resolved_at, target_date);
     PRAGMA optimize;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_profiles_invite_hash ON creator_profiles(creator_invite_hash) WHERE creator_invite_hash IS NOT NULL;
   `);
@@ -383,8 +411,97 @@ export async function getProjectBundle(projectId:string,user:ChatGPTUser) {
   const assets=database().prepare('SELECT * FROM assets WHERE project_id=? ORDER BY created_at DESC').all(projectId) as unknown as StudioAsset[];
   const rawComments=database().prepare('SELECT * FROM comments WHERE project_id=? ORDER BY created_at ASC').all(projectId) as unknown as StudioComment[];
   const comments=isStudioAdmin(user)?rawComments:rawComments.map(comment=>({...comment,author_email:comment.author_id===project.owner_id?'Project client':'Studio production'}));
+  const rawDecisions=database().prepare('SELECT * FROM decisions WHERE project_id=? ORDER BY created_at ASC').all(projectId) as unknown as StudioDecision[];
+  const decisions=isStudioAdmin(user)?rawDecisions:rawDecisions.map(decision=>({...decision,author_email:'Project client'}));
+  const agreementRow=database().prepare('SELECT * FROM project_agreements WHERE project_id=?').get(projectId) as ProjectAgreement|undefined;
+  const rawActivity=database().prepare('SELECT * FROM project_activity WHERE project_id=? ORDER BY created_at DESC').all(projectId) as unknown as ProjectActivity[];
+  const activity=rawActivity.map(item=>({...item,author_email:isStudioAdmin(user)?item.author_email:item.author_role==='client'?'Project client':item.author_role==='creator'?'Assigned creator':'Inchframe Studio'}));
   const quote=await getProjectQuoteBundle(projectId);
-  return {project,assets,comments,quote};
+  return {project:{...project},assets:assets.map(asset=>({...asset})),comments,decisions,agreement:agreementRow?{...agreementRow}:null,activity,quote};
+}
+
+function roleForProject(project:StudioProject,user:ChatGPTUser):ProjectActivity['author_role']{return isStudioAdmin(user)?'admin':project.owner_id===user.userId?'client':'creator';}
+function cleanDate(value:string|null|undefined){return value&&/^\d{4}-\d{2}-\d{2}$/.test(value)?value:null;}
+function addActivityRow(projectId:string,user:ChatGPTUser,role:ProjectActivity['author_role'],input:{kind:ProjectActivity['kind'];title:string;body:string;nextStep?:string;needsResponseFrom?:ProjectActivity['needs_response_from'];targetDate?:string|null}){
+  const now=new Date().toISOString();
+  database().prepare(`INSERT INTO project_activity (id,project_id,author_id,author_email,author_role,kind,title,body,next_step,needs_response_from,target_date,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(crypto.randomUUID(),projectId,user.userId,user.email,role,input.kind,input.title,input.body,input.nextStep||'',input.needsResponseFrom||'none',cleanDate(input.targetDate),now);
+  database().prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now,projectId);
+}
+
+export async function productionAgreementReady(projectId:string){
+  await ensureSchema();
+  const paid=database().prepare('SELECT deposit_paid_at FROM project_quotes WHERE project_id=?').get(projectId) as {deposit_paid_at:string|null}|undefined;
+  if(!paid?.deposit_paid_at)return true;
+  const agreement=database().prepare('SELECT status FROM project_agreements WHERE project_id=?').get(projectId) as {status:string}|undefined;
+  return Boolean(agreement&&['active','completed'].includes(agreement.status));
+}
+export async function saveProjectAgreement(projectId:string,user:ChatGPTUser,input:{goal:string;scope:string;deliverables:string;outOfScope:string;startDate:string|null;targetDate:string|null;milestones:string;revisionRounds:number;responseExpectation:string;clientResponsibilities:string;creatorResponsibilities:string;finalDelivery:string;changePolicy:string},submit:boolean){
+  const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
+  if(roleForProject(project,user)!=='creator')throw new Error('Only the assigned creator can draft the production agreement.');
+  if(!project.advanced_unlocked_at)throw new Error('The project must be funded before the agreement is prepared.');
+  const existing=database().prepare('SELECT * FROM project_agreements WHERE project_id=?').get(projectId) as ProjectAgreement|undefined;
+  if(existing&&['pending_client','active','completed'].includes(existing.status))throw new Error(existing.status==='pending_client'?'The agreement is with the client. Wait for approval or a recorded change request.':'The accepted agreement is locked. Record a change request before changing scope.');
+  if(submit&&(!input.goal||!input.scope||!input.deliverables||!input.startDate||!input.targetDate||!input.milestones||!input.clientResponsibilities||!input.creatorResponsibilities||!input.finalDelivery))throw new Error('Complete the goal, work product, dates, milestones, responsibilities, and final delivery terms.');
+  if(input.startDate&&input.targetDate&&input.targetDate<input.startDate)throw new Error('Target delivery must be on or after the production start.');
+  if(!Number.isInteger(input.revisionRounds)||input.revisionRounds<0||input.revisionRounds>20)throw new Error('Revision rounds must be between 0 and 20.');
+  const now=new Date().toISOString(),status=submit?'pending_client':'draft';
+  const version=existing&&existing.status==='changes_requested'?existing.version+1:existing?.version||1;
+  const values=[input.goal,input.scope,input.deliverables,input.outOfScope,cleanDate(input.startDate),cleanDate(input.targetDate),input.milestones,input.revisionRounds,'Inchframe Studio project workspace',input.responseExpectation,input.clientResponsibilities,input.creatorResponsibilities,input.finalDelivery,input.changePolicy,user.userId];
+  if(existing)database().prepare(`UPDATE project_agreements SET version=?,status=?,goal=?,scope=?,deliverables=?,out_of_scope=?,start_date=?,target_date=?,milestones=?,revision_rounds=?,communication_method=?,response_expectation=?,client_responsibilities=?,creator_responsibilities=?,final_delivery=?,change_policy=?,creator_accepted_at=?,client_accepted_at=NULL,updated_by_id=?,updated_at=? WHERE project_id=?`).run(version,status,...values.slice(0,14),submit?now:null,values[14],now,projectId);
+  else database().prepare(`INSERT INTO project_agreements (id,project_id,version,status,goal,scope,deliverables,out_of_scope,start_date,target_date,milestones,revision_rounds,communication_method,response_expectation,client_responsibilities,creator_responsibilities,final_delivery,change_policy,creator_accepted_at,updated_by_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(),projectId,version,status,...values.slice(0,14),submit?now:null,values[14],now,now);
+  if(submit){
+    database().prepare(`UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE project_id=? AND needs_response_from='creator' AND resolved_at IS NULL AND title LIKE 'Changes requested on agreement%'`).run(now,user.userId,projectId);
+    addActivityRow(projectId,user,'creator',{kind:'decision',title:`Production agreement v${version} ready`,body:'The creator submitted the scope, schedule, responsibilities, review rounds, and final-delivery terms for client approval.',needsResponseFrom:'client',targetDate:input.targetDate});
+  }
+  else database().prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now,projectId);
+  return status;
+}
+
+export async function reviewProjectAgreement(projectId:string,user:ChatGPTUser,action:'accept'|'changes',note:string){
+  const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
+  if(project.owner_id!==user.userId)throw new Error('Only the project client can approve the production agreement.');
+  const agreement=database().prepare('SELECT * FROM project_agreements WHERE project_id=?').get(projectId) as ProjectAgreement|undefined;
+  if(!agreement||!['pending_client','active'].includes(agreement.status))throw new Error('This production agreement is not open for review or amendment.');
+  if(action==='accept'&&agreement.status!=='pending_client')throw new Error('The active agreement is already accepted.');
+  if(action==='changes'&&!note.trim())throw new Error('Describe the agreement change needed.');
+  const now=new Date().toISOString();
+  database().prepare(`UPDATE project_agreements SET status=?,client_accepted_at=?,updated_by_id=?,updated_at=? WHERE project_id=?`).run(action==='accept'?'active':'changes_requested',action==='accept'?now:null,user.userId,now,projectId);
+  database().prepare(`UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE project_id=? AND needs_response_from='client' AND resolved_at IS NULL AND title LIKE 'Production agreement%'`).run(now,user.userId,projectId);
+  addActivityRow(projectId,user,'client',action==='accept'?{kind:'decision',title:`Production agreement v${agreement.version} accepted`,body:note||'The client approved the work product, timeframe, responsibilities, review rounds, and final-delivery terms.'}:{kind:'decision',title:`Changes requested on agreement v${agreement.version}`,body:note,needsResponseFrom:'creator'});
+  return action==='accept'?'active':'changes_requested';
+}
+
+export async function addProjectActivity(user:ChatGPTUser,projectId:string,input:{kind:ProjectActivity['kind'];title:string;body:string;nextStep:string;needsResponseFrom:ProjectActivity['needs_response_from'];targetDate:string|null}){
+  const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
+  if(!project.advanced_unlocked_at)throw new Error('The funded project workspace is not open.');
+  const role=roleForProject(project,user);
+  if(role==='client'&&!['message','decision','blocker'].includes(input.kind))throw new Error('Clients can post messages, decisions, and blockers.');
+  if(!input.title||!input.body)throw new Error('Add a short title and update.');
+  addActivityRow(projectId,user,role,input);
+}
+
+export async function resolveProjectActivity(projectId:string,activityId:string,user:ChatGPTUser){
+  const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
+  const role=roleForProject(project,user),item=database().prepare('SELECT * FROM project_activity WHERE id=? AND project_id=?').get(activityId,projectId) as ProjectActivity|undefined;
+  if(!item)throw new Error('Activity item not found.');
+  if(item.resolved_at)return;
+  if(role!=='admin'&&item.author_id!==user.userId&&item.needs_response_from!==role)throw new Error('This action item is assigned to another project participant.');
+  const now=new Date().toISOString();database().prepare('UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE id=?').run(now,user.userId,activityId);database().prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now,projectId);
+}
+
+export async function listAdminProjectOperations(user:ChatGPTUser):Promise<AdminProjectOperation[]>{
+  await ensureSchema();if(!isStudioAdmin(user))return [];
+  return database().prepare(`SELECT p.id project_id,p.title,p.project_type,p.status project_status,p.owner_email,p.due_date,p.updated_at,cp.display_name creator_name,pa.status agreement_status,pa.target_date agreement_target_date,
+    (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.needs_response_from='admin' AND x.resolved_at IS NULL) admin_actions,
+    (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.needs_response_from!='none' AND x.resolved_at IS NULL) open_actions,
+    (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.kind='blocker' AND x.resolved_at IS NULL) blockers,
+    (SELECT COUNT(*) FROM assets a WHERE a.project_id=p.id AND a.status='in_review') pending_reviews,
+    (SELECT MAX(x.created_at) FROM project_activity x WHERE x.project_id=p.id) latest_activity_at,
+    (SELECT x.title FROM project_activity x WHERE x.project_id=p.id ORDER BY x.created_at DESC LIMIT 1) latest_activity_title,
+    (SELECT x.kind FROM project_activity x WHERE x.project_id=p.id ORDER BY x.created_at DESC LIMIT 1) latest_activity_kind
+    FROM projects p LEFT JOIN project_agreements pa ON pa.project_id=p.id LEFT JOIN creator_profiles cp ON cp.id=COALESCE(p.assigned_creator_id,p.requested_creator_id)
+    ORDER BY CASE WHEN (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.needs_response_from='admin' AND x.resolved_at IS NULL)>0 THEN 0 ELSE 1 END,p.updated_at DESC`).all().map(row=>({...row})) as unknown as AdminProjectOperation[];
 }
 
 export function studioMinimumCents(){const configured=Number(process.env.STUDIO_MIN_PROJECT_CENTS||30000);return Number.isInteger(configured)&&configured>=100?configured:30000;}
@@ -568,11 +685,16 @@ export async function addComment(user:ChatGPTUser,projectId:string,assetId:strin
 export async function recordDecision(user:ChatGPTUser,projectId:string,assetId:string,decision:'approved'|'changes_requested',note:string) {
   await ensureSchema();
   const now=new Date().toISOString(),db=database();
+  const asset=db.prepare('SELECT kind,label,filename,version FROM assets WHERE id=? AND project_id=?').get(assetId,projectId) as {kind:string;label:string;filename:string;version:number}|undefined;
+  if(!asset)throw new Error('Review file not found.');
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('INSERT INTO decisions (id,project_id,asset_id,author_id,author_email,decision,note,created_at) VALUES (?,?,?,?,?,?,?,?)').run(crypto.randomUUID(),projectId,assetId,user.userId,user.email,decision,note,now);
     db.prepare('UPDATE assets SET status=? WHERE id=? AND project_id=?').run(decision,assetId,projectId);
-    db.prepare('UPDATE projects SET updated_at=?,status=? WHERE id=?').run(now,decision==='approved'?'approval_recorded':'revisions_requested',projectId);
+    const finalAccepted=asset.kind==='deliverable'&&decision==='approved';
+    db.prepare('UPDATE projects SET updated_at=?,status=? WHERE id=?').run(now,finalAccepted?'final_delivery_accepted':decision==='approved'?'approval_recorded':'revisions_requested',projectId);
+    if(finalAccepted){db.prepare(`UPDATE project_agreements SET status='completed',completed_at=?,updated_by_id=?,updated_at=? WHERE project_id=? AND status='active'`).run(now,user.userId,now,projectId);db.prepare(`UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE project_id=? AND kind='delivery' AND needs_response_from='client' AND resolved_at IS NULL`).run(now,user.userId,projectId);}
+    db.prepare(`INSERT INTO project_activity (id,project_id,author_id,author_email,author_role,kind,title,body,next_step,needs_response_from,target_date,created_at) VALUES (?,?,?,?,?,'decision',?,?,?,'none',NULL,?)`).run(crypto.randomUUID(),projectId,user.userId,user.email,'client',finalAccepted?'Final delivery accepted':decision==='approved'?'Review version approved':'Changes requested',`${asset.label||asset.filename} · version ${asset.version}`,note,now);
     db.exec('COMMIT');
   } catch(error) {db.exec('ROLLBACK');throw error;}
 }

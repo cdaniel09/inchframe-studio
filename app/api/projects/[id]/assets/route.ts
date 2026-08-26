@@ -1,5 +1,5 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { addAsset,getProjectForUser,isStudioAdmin } from '@/lib/data';
+import { addAsset,getProjectForUser,isStudioAdmin,productionAgreementReady } from '@/lib/data';
 import { deleteStoredFile,writeStoredFile } from '@/lib/storage';
 
 export const runtime='nodejs';
@@ -16,6 +16,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
   let form:FormData;try{form=await request.formData();}catch{return Response.json({error:'Invalid upload form.'},{status:400});}
   let kind=String(form.get('kind')||'seed');if(!productionUploader&&!['seed','audio'].includes(kind))kind='seed';
   if(!['seed','audio','review','deliverable'].includes(kind))return Response.json({error:'Invalid file type.'},{status:400});
+  if(productionUploader&&['review','deliverable'].includes(kind)&&!await productionAgreementReady(id))return Response.json({error:'Activate the client-approved production agreement before uploading review or delivery work.'},{status:409});
   const label=String(form.get('label')||'').trim().slice(0,120);
   const files=form.getAll('files').filter((entry):entry is File=>entry instanceof File);
   if(!files.length||files.length>12)return Response.json({error:'Choose between 1 and 12 files.'},{status:400});
