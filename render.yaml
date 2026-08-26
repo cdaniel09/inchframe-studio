@@ -21,6 +21,10 @@ services:
         generateValue: true
       - key: ADMIN_EMAIL
         value: info@inchframe.com
+      - key: VERIFIED_EMAIL_ALLOWLIST
+        value: admin@inchframe.com
+      - key: INQUIRY_NOTIFICATION_EMAIL
+        value: info@inchframe.com
       - key: ADMIN_PASSWORD_HASH
         sync: false
       - key: SMTP_HOST

@@ -45,6 +45,15 @@ function addColumn(table:'users'|'projects', existing:Set<string>, name:string, 
   return true;
 }
 
+function verificationExemptEmails() {
+  return new Set(['admin@inchframe.com',process.env.ADMIN_EMAIL,...(process.env.VERIFIED_EMAIL_ALLOWLIST||'').split(',')]
+    .map(value=>value?.trim().toLowerCase()).filter((value):value is string=>Boolean(value)));
+}
+
+export function isEmailVerificationExempt(email:string) {
+  return verificationExemptEmails().has(email.trim().toLowerCase());
+}
+
 export async function ensureSchema() {
   if (globalForStudio.inchframeSchemaReady) return;
   const db=database();
@@ -83,13 +92,19 @@ export async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS request_limits (
       key TEXT PRIMARY KEY, action TEXT NOT NULL, window_started INTEGER NOT NULL, request_count INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL, display_name TEXT NOT NULL,
+      full_name TEXT, role TEXT NOT NULL CHECK(role IN ('admin','client')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      key TEXT PRIMARY KEY, applied_at TEXT NOT NULL
+    );
   `);
 
   const userColumns=columns('users');
-  const addedVerification=addColumn('users',userColumns,'email_verified_at','TEXT');
+  addColumn('users',userColumns,'email_verified_at','TEXT');
   addColumn('users',userColumns,'verification_token_hash','TEXT');
   addColumn('users',userColumns,'verification_expires_at','TEXT');
-  if(addedVerification) db.prepare('UPDATE users SET email_verified_at=created_at WHERE email_verified_at IS NULL').run();
 
   const projectColumns=columns('projects');
   addColumn('projects',projectColumns,'accepted_at','TEXT');
@@ -110,8 +125,24 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_assets_project_created ON assets(project_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comments_project_asset ON comments(project_id, asset_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_decisions_asset_created ON decisions(asset_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     PRAGMA optimize;
   `);
+
+  const verificationMigration='require-existing-client-verification-v1';
+  const alreadyApplied=db.prepare('SELECT 1 FROM schema_migrations WHERE key=?').get(verificationMigration);
+  if(!alreadyApplied) {
+    const now=new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE users SET email_verified_at=NULL,verification_token_hash=NULL,verification_expires_at=NULL').run();
+      for(const email of verificationExemptEmails()) {
+        db.prepare('UPDATE users SET email_verified_at=? WHERE email=? COLLATE NOCASE').run(now,email);
+      }
+      db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(verificationMigration,now);
+      db.exec('COMMIT');
+    } catch(error) {db.exec('ROLLBACK');throw error;}
+  }
   globalForStudio.inchframeSchemaReady = true;
 }
 
@@ -120,6 +151,27 @@ export function isStudioAdmin(user: ChatGPTUser | string) {
   const configured = [process.env.ADMIN_EMAIL, ...(process.env.STUDIO_ADMIN_EMAILS || '').split(',')]
     .map(value => value?.trim().toLowerCase()).filter(Boolean);
   return configured.includes(user.toLowerCase());
+}
+
+export async function createStudioSessionRecord(tokenHash:string,user:ChatGPTUser,expiresAt:string) {
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(now);
+  db.prepare('INSERT INTO sessions (token_hash,user_id,email,display_name,full_name,role,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(tokenHash,user.userId,user.email,user.displayName,user.fullName,user.role,expiresAt,now);
+}
+
+export async function findStudioSession(tokenHash:string):Promise<ChatGPTUser|null> {
+  await ensureSchema();
+  const now=new Date().toISOString();
+  const row=database().prepare('SELECT user_id,email,display_name,full_name,role FROM sessions WHERE token_hash=? AND expires_at>?').get(tokenHash,now) as {user_id:string;email:string;display_name:string;full_name:string|null;role:'admin'|'client'}|undefined;
+  if(!row) return null;
+  return {userId:row.user_id,email:row.email,displayName:row.display_name,fullName:row.full_name,role:row.role};
+}
+
+export async function deleteStudioSession(tokenHash:string) {
+  await ensureSchema();
+  database().prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash);
 }
 
 export async function checkRateLimit(action:string,identifier:string,limit:number,windowMs:number) {

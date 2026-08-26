@@ -1,61 +1,15 @@
 import 'server-only';
 import nodemailer from 'nodemailer';
 
-type Mail = {to:string; subject:string; text:string; html:string; debug?:Record<string,string>};
+type Mail={to:string;subject:string;text:string;html:string;debug?:Record<string,string>};
+function escapeHtml(value:string){return value.replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[character]||character));}
+function studioUrl(path:string){const origin=process.env.NEXT_PUBLIC_SITE_URL?.trim()||'http://localhost:3000';return new URL(path,origin).toString();}
+function label(value:string){return value.replaceAll('_',' ').replace(/\b\w/g,character=>character.toUpperCase());}
+async function sendMail(mail:Mail){if(process.env.EMAIL_TRANSPORT==='console'&&process.env.NODE_ENV!=='production'){console.info('[studio-email]',JSON.stringify({to:mail.to,subject:mail.subject,...mail.debug}));return;}const host=process.env.SMTP_HOST?.trim();const port=Number(process.env.SMTP_PORT||465);const user=process.env.SMTP_USER?.trim();const pass=process.env.SMTP_PASS;if(!host||!user||!pass||!Number.isInteger(port))throw new Error('Studio email delivery is not configured.');const transport=nodemailer.createTransport({host,port,secure:port===465,auth:{user,pass}});await transport.sendMail({from:process.env.EMAIL_FROM?.trim()||`Inchframe Studio <${user}>`,replyTo:process.env.EMAIL_REPLY_TO?.trim()||user,to:mail.to,subject:mail.subject,text:mail.text,html:mail.html});}
+function emailShell(content:string){return `<!doctype html><html><body style="margin:0;background:#050705;color:#fbfaf2;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:42px 24px"><p style="color:#9cf21f;font-weight:800;letter-spacing:.1em">INCHFRAME STUDIO</p>${content}<p style="margin-top:34px;color:#9ca29a;font-size:13px">Directed AI-assisted video production by Unus Mundus LLC.</p></div></body></html>`;}
 
-function escapeHtml(value:string) {
-  return value.replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[character] || character));
-}
+export async function sendVerificationEmail(input:{email:string;displayName:string;token:string}){const verifyUrl=studioUrl(`/api/auth/verify?token=${encodeURIComponent(input.token)}`);const name=escapeHtml(input.displayName);await sendMail({to:input.email,subject:'Verify your Inchframe Studio email',text:`Hi ${input.displayName},\n\nVerify your email to submit a project inquiry: ${verifyUrl}\n\nThis link expires in 24 hours.`,html:emailShell(`<h1 style="font-size:34px;line-height:1.05">Verify your email.</h1><p style="color:#c7cbc4;line-height:1.6">Hi ${name}, confirm your address to submit a short project inquiry. No access code is needed.</p><p style="margin:28px 0"><a href="${verifyUrl}" style="display:inline-block;padding:15px 22px;border-radius:999px;background:#9cf21f;color:#081006;font-weight:800;text-decoration:none">Verify email →</a></p><p style="color:#9ca29a;font-size:13px">This link expires in 24 hours.</p>`),debug:{verifyUrl}});}
 
-function studioUrl(path:string) {
-  const origin=process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000';
-  return new URL(path, origin).toString();
-}
+export async function sendInquiryReceivedEmails(input:{email:string;displayName:string;projectId:string;title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string}){const projectUrl=studioUrl(`/portal/projects/${encodeURIComponent(input.projectId)}`);const adminEmail=process.env.INQUIRY_NOTIFICATION_EMAIL?.trim()||process.env.ADMIN_EMAIL?.trim();if(!adminEmail)throw new Error('Inquiry notification recipient is not configured.');const details=`Project: ${input.title}\nType: ${label(input.projectType)}\nBudget: ${label(input.budgetRange)}\nDeadline: ${input.dueDate||'Not specified'}\nAudience: ${input.audience||'Not specified'}\nPlatforms: ${input.platforms||'Not specified'}\n\n${input.brief}\n\nOpen: ${projectUrl}`;const results=await Promise.allSettled([sendMail({to:adminEmail,subject:`New Studio inquiry: ${input.title}`,text:`A verified customer submitted a new inquiry.\n\nCustomer: ${input.displayName} <${input.email}>\n${details}`,html:emailShell(`<h1 style="font-size:34px;line-height:1.05">New project inquiry.</h1><p style="color:#c7cbc4"><strong>${escapeHtml(input.displayName)}</strong> &lt;${escapeHtml(input.email)}&gt;</p><p style="color:#c7cbc4;line-height:1.6"><strong>${escapeHtml(input.title)}</strong><br>${escapeHtml(label(input.projectType))} · ${escapeHtml(label(input.budgetRange))}<br>Deadline: ${escapeHtml(input.dueDate||'Not specified')}</p><p style="color:#c7cbc4;line-height:1.6">${escapeHtml(input.brief)}</p><p style="margin:28px 0"><a href="${projectUrl}" style="display:inline-block;padding:15px 22px;border-radius:999px;background:#9cf21f;color:#081006;font-weight:800;text-decoration:none">Review inquiry →</a></p>`),debug:{projectUrl,mailKind:'admin-inquiry'}}),sendMail({to:input.email,subject:`We received your Inchframe Studio inquiry: ${input.title}`,text:`Hi ${input.displayName},\n\nYour inquiry has been saved and sent to the Studio for review. We’ll follow up after checking fit, schedule, and budget.\n\n${details}`,html:emailShell(`<h1 style="font-size:34px;line-height:1.05">Inquiry received.</h1><p style="color:#c7cbc4;line-height:1.6">Hi ${escapeHtml(input.displayName)}, your inquiry for <strong>${escapeHtml(input.title)}</strong> is saved and with the Studio for review.</p><p style="color:#c7cbc4;line-height:1.6">If it’s a fit, we’ll email a one-time project code that unlocks the advanced media workspace.</p><p style="margin:28px 0"><a href="${projectUrl}" style="display:inline-block;padding:15px 22px;border-radius:999px;background:#9cf21f;color:#081006;font-weight:800;text-decoration:none">View inquiry →</a></p>`),debug:{projectUrl,mailKind:'client-confirmation'}})]);const failures=results.filter(result=>result.status==='rejected');if(failures.length)throw new Error(`Could not send ${failures.length} inquiry notification email(s).`);}
 
-async function sendMail(mail:Mail) {
-  if(process.env.EMAIL_TRANSPORT==='console' && process.env.NODE_ENV!=='production') {
-    console.info('[studio-email]', JSON.stringify({to:mail.to,subject:mail.subject,...mail.debug}));
-    return;
-  }
-  const host=process.env.SMTP_HOST?.trim();
-  const port=Number(process.env.SMTP_PORT || 465);
-  const user=process.env.SMTP_USER?.trim();
-  const pass=process.env.SMTP_PASS;
-  if(!host || !user || !pass || !Number.isInteger(port)) throw new Error('Studio email delivery is not configured.');
-  const transport=nodemailer.createTransport({host,port,secure:port===465,auth:{user,pass}});
-  await transport.sendMail({
-    from:process.env.EMAIL_FROM?.trim() || `Inchframe Studio <${user}>`,
-    replyTo:process.env.EMAIL_REPLY_TO?.trim() || user,
-    to:mail.to,
-    subject:mail.subject,
-    text:mail.text,
-    html:mail.html,
-  });
-}
-
-function emailShell(content:string) {
-  return `<!doctype html><html><body style="margin:0;background:#050705;color:#fbfaf2;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:42px 24px"><p style="color:#9cf21f;font-weight:800;letter-spacing:.1em">INCHFRAME STUDIO</p>${content}<p style="margin-top:34px;color:#9ca29a;font-size:13px">Directed AI-assisted video production by Unus Mundus LLC.</p></div></body></html>`;
-}
-
-export async function sendVerificationEmail(input:{email:string;displayName:string;token:string}) {
-  const verifyUrl=studioUrl(`/api/auth/verify?token=${encodeURIComponent(input.token)}`);
-  const name=escapeHtml(input.displayName);
-  await sendMail({
-    to:input.email,
-    subject:'Verify your Inchframe Studio email',
-    text:`Hi ${input.displayName},\n\nVerify your email to submit a project inquiry: ${verifyUrl}\n\nThis link expires in 24 hours.`,
-    html:emailShell(`<h1 style="font-size:34px;line-height:1.05">Verify your email.</h1><p style="color:#c7cbc4;line-height:1.6">Hi ${name}, confirm your address to submit a short project inquiry. No access code is needed.</p><p style="margin:28px 0"><a href="${verifyUrl}" style="display:inline-block;padding:15px 22px;border-radius:999px;background:#9cf21f;color:#081006;font-weight:800;text-decoration:none">Verify email →</a></p><p style="color:#9ca29a;font-size:13px">This link expires in 24 hours.</p>`),
-    debug:{verifyUrl},
-  });
-}
-
-export async function sendProjectAcceptedEmail(input:{email:string;displayName:string;projectId:string;projectTitle:string;accessCode:string}) {
-  const projectUrl=studioUrl(`/portal/projects/${encodeURIComponent(input.projectId)}`);
-  await sendMail({
-    to:input.email,
-    subject:`Your Inchframe Studio project is approved: ${input.projectTitle}`,
-    text:`Hi ${input.displayName},\n\nWe would like to move forward with ${input.projectTitle}. Sign in at ${projectUrl} and enter this one-time project code: ${input.accessCode}\n\nThe code expires in 14 days. After you use it, the advanced project area stays unlocked for your account.`,
-    html:emailShell(`<h1 style="font-size:34px;line-height:1.05">Your project is moving forward.</h1><p style="color:#c7cbc4;line-height:1.6">Hi ${escapeHtml(input.displayName)}, we reviewed <strong>${escapeHtml(input.projectTitle)}</strong> and would like to continue.</p><p style="color:#9ca29a">Your one-time project code</p><p style="font-size:26px;letter-spacing:.08em;font-weight:900;color:#9cf21f">${escapeHtml(input.accessCode)}</p><p style="margin:28px 0"><a href="${projectUrl}" style="display:inline-block;padding:15px 22px;border-radius:999px;background:#9cf21f;color:#081006;font-weight:800;text-decoration:none">Open advanced project area →</a></p><p style="color:#9ca29a;font-size:13px">The code expires in 14 days. Once redeemed, this project remains unlocked in your account.</p>`),
-    debug:{projectUrl,projectCode:input.accessCode},
-  });
-}
+export async function sendProjectAcceptedEmail(input:{email:string;displayName:string;projectId:string;projectTitle:string;accessCode:string}){const projectUrl=studioUrl(`/portal/projects/${encodeURIComponent(input.projectId)}`);await sendMail({to:input.email,subject:`Your Inchframe Studio project is approved: ${input.projectTitle}`,text:`Hi ${input.displayName},\n\nWe would like to move forward with ${input.projectTitle}. Sign in at ${projectUrl} and enter this one-time project code: ${input.accessCode}\n\nThe code expires in 14 days. After you use it, the advanced project area stays unlocked for your account.`,html:emailShell(`<h1 style="font-size:34px;line-height:1.05">Your project is moving forward.</h1><p style="color:#c7cbc4;line-height:1.6">Hi ${escapeHtml(input.displayName)}, we reviewed <strong>${escapeHtml(input.projectTitle)}</strong> and would like to continue.</p><p style="color:#9ca29a">Your one-time project code</p><p style="font-size:26px;letter-spacing:.08em;font-weight:900;color:#9cf21f">${escapeHtml(input.accessCode)}</p><p style="margin:28px 0"><a href="${projectUrl}" style="display:inline-block;padding:15px 22px;border-radius:999px;background:#9cf21f;color:#081006;font-weight:800;text-decoration:none">Open advanced project area →</a></p><p style="color:#9ca29a;font-size:13px">The code expires in 14 days. Once redeemed, this project remains unlocked in your account.</p>`),debug:{projectUrl,projectCode:input.accessCode}});}
