@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import { createStudioSession, type ChatGPTUser } from '@/app/chatgpt-auth';
 import { createStudioAccount, findStudioAccount, isStudioAdmin } from '@/lib/data';
 import { hashPassword, secretsEqual } from '@/lib/password';
+import { publicUrl } from '@/lib/public-url';
 
 export const runtime = 'nodejs';
 
 function redirectWith(request: Request, path: string) {
-  return NextResponse.redirect(new URL(path, request.url), 303);
+  return NextResponse.redirect(publicUrl(request, path), 303);
 }
 
 export async function POST(request: Request) {
