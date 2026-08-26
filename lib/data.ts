@@ -10,11 +10,13 @@ export type StudioProject = {
   brief:string; audience:string; platforms:string; due_date:string|null; aspect_ratios:string; style_notes:string;
   budget_range:string; accepted_at:string|null; declined_at:string|null; access_code_hash:string|null;
   access_code_expires_at:string|null; advanced_unlocked_at:string|null; advanced_brief:string; must_have:string;
-  avoid_notes:string; reference_links:string; audio_notes:string; created_at:string; updated_at:string;
+  avoid_notes:string; reference_links:string; audio_notes:string; requested_creator:string; created_at:string; updated_at:string;
 };
 export type StudioAsset = {id:string;project_id:string;uploaded_by_id:string;uploaded_by_email:string;kind:string;object_key:string;filename:string;mime_type:string;byte_size:number;label:string;version:number;status:string;created_at:string};
 export type StudioComment = {id:string;project_id:string;asset_id:string|null;author_id:string;author_email:string;body:string;created_at:string};
 export type StudioAccount = {id:string;email:string;display_name:string;password_hash:string;role:'client';email_verified_at:string|null;verification_token_hash:string|null;verification_expires_at:string|null;created_at:string};
+export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
+export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
 
 const globalForStudio = globalThis as typeof globalThis & {inchframeStudioDb?: DatabaseSync; inchframeSchemaReady?: boolean};
 
@@ -34,11 +36,11 @@ function database() {
   return db;
 }
 
-function columns(table:'users'|'projects') {
+function columns(table:'users'|'projects'|'creator_profiles') {
   return new Set((database().prepare(`PRAGMA table_info(${table})`).all() as unknown as {name:string}[]).map(column=>column.name));
 }
 
-function addColumn(table:'users'|'projects', existing:Set<string>, name:string, definition:string) {
+function addColumn(table:'users'|'projects'|'creator_profiles', existing:Set<string>, name:string, definition:string) {
   if(existing.has(name)) return false;
   database().exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
   existing.add(name);
@@ -99,6 +101,19 @@ export async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS schema_migrations (
       key TEXT PRIMARY KEY, applied_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS creator_profiles (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, owner_email TEXT NOT NULL, display_name TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE COLLATE NOCASE, headline TEXT NOT NULL, bio TEXT NOT NULL, specialties TEXT NOT NULL,
+      location TEXT NOT NULL, rate_unit TEXT NOT NULL CHECK(rate_unit IN ('project','day','hour')),
+      rate_min INTEGER NOT NULL, rate_max INTEGER NOT NULL, availability TEXT NOT NULL, inchframe_email TEXT NOT NULL,
+      pro_confirmed INTEGER NOT NULL DEFAULT 0, pro_verified INTEGER NOT NULL DEFAULT 0, identity_verified INTEGER NOT NULL DEFAULT 0, tax_verified INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','declined')),
+      creator_invite_hash TEXT UNIQUE,
+      avatar_object_key TEXT NOT NULL, avatar_mime_type TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, reviewed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS creator_samples (
+      id TEXT PRIMARY KEY, creator_id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, sort_order INTEGER NOT NULL,
+      FOREIGN KEY(creator_id) REFERENCES creator_profiles(id) ON DELETE CASCADE, UNIQUE(creator_id,sort_order)
+    );
   `);
 
   const userColumns=columns('users');
@@ -117,7 +132,14 @@ export async function ensureSchema() {
   addColumn('projects',projectColumns,'avoid_notes',"TEXT NOT NULL DEFAULT ''");
   addColumn('projects',projectColumns,'reference_links',"TEXT NOT NULL DEFAULT ''");
   addColumn('projects',projectColumns,'audio_notes',"TEXT NOT NULL DEFAULT ''");
+  addColumn('projects',projectColumns,'requested_creator',"TEXT NOT NULL DEFAULT ''");
   if(addedUnlock) db.prepare('UPDATE projects SET advanced_unlocked_at=created_at WHERE advanced_unlocked_at IS NULL').run();
+
+  const creatorColumns=columns('creator_profiles');
+  addColumn('creator_profiles',creatorColumns,'creator_invite_hash','TEXT');
+  addColumn('creator_profiles',creatorColumns,'pro_verified','INTEGER NOT NULL DEFAULT 0');
+  addColumn('creator_profiles',creatorColumns,'identity_verified','INTEGER NOT NULL DEFAULT 0');
+  addColumn('creator_profiles',creatorColumns,'tax_verified','INTEGER NOT NULL DEFAULT 0');
 
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token_hash) WHERE verification_token_hash IS NOT NULL;
@@ -126,7 +148,10 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_comments_project_asset ON comments(project_id, asset_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_decisions_asset_created ON decisions(asset_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_creator_profiles_status_updated ON creator_profiles(status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_creator_samples_creator_sort ON creator_samples(creator_id, sort_order);
     PRAGMA optimize;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_profiles_invite_hash ON creator_profiles(creator_invite_hash) WHERE creator_invite_hash IS NOT NULL;
   `);
 
   const verificationMigration='require-existing-client-verification-v1';
@@ -174,6 +199,81 @@ export async function deleteStudioSession(tokenHash:string) {
   database().prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash);
 }
 
+function withCreatorSamples(profile:Omit<CreatorProfile,'samples'>&{creator_invite_hash?:string}):CreatorProfile {
+  const samples=database().prepare('SELECT * FROM creator_samples WHERE creator_id=? ORDER BY sort_order').all(profile.id) as unknown as CreatorSample[];
+  const publicProfile={...profile};delete publicProfile.creator_invite_hash;return {...publicProfile,samples};
+}
+
+function creatorSlug(value:string){const normalized=value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,54);return normalized||'creator';}
+
+export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName:string;headline:string;bio:string;specialties:string;location:string;rateUnit:'project'|'day'|'hour';rateMin:number;rateMax:number;availability:string;inchframeEmail:string;creatorInviteHash?:string;samples:{title:string;url:string}[];avatarKey?:string;avatarMime?:string}) {
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const existing=db.prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
+  if(!existing&&!input.avatarKey)throw new Error('A profile icon is required.');
+  if(!existing&&!input.creatorInviteHash)throw new Error('A Pro Creator invite key is required.');
+  const id=existing?.id||crypto.randomUUID();
+  let slug=existing?.slug||creatorSlug(input.displayName);
+  if(!existing){const collision=db.prepare('SELECT 1 FROM creator_profiles WHERE slug=? COLLATE NOCASE').get(slug);if(collision)slug=`${slug.slice(0,45)}-${id.slice(0,8)}`;}
+  const avatarKey=input.avatarKey||existing?.avatar_object_key||'';
+  const avatarMime=input.avatarMime||existing?.avatar_mime_type||'';
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(user.email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,now,id);
+    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,creator_invite_hash,pro_confirmed,status,avatar_object_key,avatar_mime_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,input.creatorInviteHash||'',avatarKey,avatarMime,now,now);
+    db.prepare('DELETE FROM creator_samples WHERE creator_id=?').run(id);
+    const insert=db.prepare('INSERT INTO creator_samples (id,creator_id,title,url,sort_order) VALUES (?,?,?,?,?)');
+    input.samples.slice(0,5).forEach((sample,index)=>insert.run(crypto.randomUUID(),id,sample.title,sample.url,index));
+    db.exec('COMMIT');
+  } catch(error){db.exec('ROLLBACK');throw error;}
+  return {id,slug,oldAvatarKey:existing?.avatar_object_key||null};
+}
+
+export async function getCreatorApplicationForUser(user:ChatGPTUser) {
+  await ensureSchema();
+  const profile=database().prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
+  return profile?withCreatorSamples(profile):null;
+}
+
+export async function listCreatorApplications(user:ChatGPTUser) {
+  await ensureSchema();
+  const rows=(isStudioAdmin(user)?database().prepare('SELECT * FROM creator_profiles ORDER BY updated_at DESC').all():database().prepare('SELECT * FROM creator_profiles WHERE user_id=? ORDER BY updated_at DESC').all(user.userId)) as unknown as Omit<CreatorProfile,'samples'>[];
+  return rows.map(withCreatorSamples);
+}
+
+export async function getCreatorApplicationById(id:string) {
+  await ensureSchema();
+  const profile=database().prepare('SELECT * FROM creator_profiles WHERE id=?').get(id) as Omit<CreatorProfile,'samples'>|undefined;
+  return profile?withCreatorSamples(profile):null;
+}
+
+export async function reviewCreatorApplication(id:string,status:'approved'|'declined',verification:{proVerified:boolean;identityVerified:boolean;taxVerified:boolean}) {
+  await ensureSchema();
+  const now=new Date().toISOString();
+  database().prepare('UPDATE creator_profiles SET status=?,pro_verified=?,identity_verified=?,tax_verified=?,reviewed_at=?,updated_at=? WHERE id=?').run(status,verification.proVerified?1:0,verification.identityVerified?1:0,verification.taxVerified?1:0,now,now,id);
+}
+
+export async function listPublicCreators() {
+  await ensureSchema();
+  const rows=database().prepare(`SELECT * FROM creator_profiles WHERE status='approved' ORDER BY display_name COLLATE NOCASE`).all() as unknown as Omit<CreatorProfile,'samples'>[];
+  return rows.map(withCreatorSamples);
+}
+
+export async function getPublicCreatorBySlug(slug:string) {
+  await ensureSchema();
+  const profile=database().prepare(`SELECT * FROM creator_profiles WHERE slug=? COLLATE NOCASE AND status='approved'`).get(slug) as Omit<CreatorProfile,'samples'>|undefined;
+  return profile?withCreatorSamples(profile):null;
+}
+
+export async function getCreatorIconForViewer(id:string,user:ChatGPTUser|null) {
+  await ensureSchema();
+  const profile=database().prepare('SELECT user_id,status,avatar_object_key,avatar_mime_type FROM creator_profiles WHERE id=?').get(id) as {user_id:string;status:string;avatar_object_key:string;avatar_mime_type:string}|undefined;
+  if(!profile)return null;
+  const publicIcon=profile.status==='approved';
+  if(!publicIcon&&(!user||(profile.user_id!==user.userId&&!isStudioAdmin(user))))return null;
+  return {objectKey:profile.avatar_object_key,mimeType:profile.avatar_mime_type,public:publicIcon};
+}
+
 export async function checkRateLimit(action:string,identifier:string,limit:number,windowMs:number) {
   await ensureSchema();
   const key=createHash('sha256').update(`${action}:${identifier}`).digest('hex');
@@ -216,11 +316,11 @@ export async function verifyStudioAccount(tokenHash:string) {
   return {...account,email_verified_at:now,verification_token_hash:null,verification_expires_at:null};
 }
 
-export async function createProject(user:ChatGPTUser,input:{title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string}) {
+export async function createProject(user:ChatGPTUser,input:{title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string;requestedCreator?:string}) {
   await ensureSchema();
   const id=crypto.randomUUID(),now=new Date().toISOString();
-  database().prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,created_at,updated_at) VALUES (?,?,?,?,?,'inquiry_received',?,?,?,?, '[]','',?,?,?)`)
-    .run(id,user.userId,user.email,input.title,input.projectType,input.brief,input.audience,input.platforms,input.dueDate,input.budgetRange,now,now);
+  database().prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,requested_creator,created_at,updated_at) VALUES (?,?,?,?,?,'inquiry_received',?,?,?,?, '[]','',?,?,?,?)`)
+    .run(id,user.userId,user.email,input.title,input.projectType,input.brief,input.audience,input.platforms,input.dueDate,input.budgetRange,input.requestedCreator||'',now,now);
   return id;
 }
 

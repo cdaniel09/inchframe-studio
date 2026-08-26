@@ -42,3 +42,17 @@ After the service is live, add `studio.inchframe.com` as a custom domain and poi
 - Portal: `/portal`.
 
 This single-instance disk design keeps initial cost and operations low. Move the database to managed Postgres and files to object storage before scaling to multiple instances.
+
+## Paid Pro creator invite contract
+
+The main Inchframe account site issues creator invite keys; Studio only verifies and consumes them. Configure the same long random `CREATOR_INVITE_SECRET` on both services.
+
+Key format: `ifc1.<base64url-json>.<base64url-hmac>`
+
+Payload:
+
+```json
+{"v":1,"email":"member@example.com","plan":"pro","purpose":"creator","exp":1770000000,"nonce":"uuid"}
+```
+
+Sign the ASCII string `ifc1.<base64url-json>` with HMAC-SHA256 and encode the signature as unpadded base64url. Studio requires the payload email to match the private Inchframe email in the application, rejects expired/non-Pro keys, and stores a SHA-256 hash under a unique constraint so one key cannot establish multiple creator profiles. A seven-day expiry is recommended. Do not put invite keys in URLs; let the member copy and paste the key from their paid account.

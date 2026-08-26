@@ -25,6 +25,8 @@ services:
         value: admin@inchframe.com
       - key: INQUIRY_NOTIFICATION_EMAIL
         value: info@inchframe.com
+      - key: CREATOR_INVITE_SECRET
+        sync: false
       - key: ADMIN_PASSWORD_HASH
         sync: false
       - key: SMTP_HOST
