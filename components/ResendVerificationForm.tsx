@@ -1,0 +1,7 @@
+'use client';
+import { useState } from 'react';
+export function ResendVerificationForm({initialEmail=''}:{initialEmail?:string}) {
+  const[message,setMessage]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);
+  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');setMessage('');try{const response=await fetch('/api/auth/resend-verification',{method:'POST',body:new FormData(event.currentTarget),headers:{accept:'application/json'},cache:'no-store'});const result=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(result.error||'Could not resend verification.');setMessage(result.message||'Verification sent.');}catch(reason){setError(reason instanceof Error?reason.message:'Could not resend verification.');}finally{setBusy(false);}}
+  return <form className="auth-card" onSubmit={submit}><span className="card-code">EMAIL VERIFICATION</span><h2>Check your inbox.</h2><p>Use the verification link we sent before submitting an inquiry. It expires in 24 hours.</p><label><span>Email</span><input name="email" type="email" autoComplete="email" defaultValue={initialEmail} required/></label>{message&&<p className="success-message" role="status">{message}</p>}{error&&<p className="form-error" role="alert">{error}</p>}<button className="button button-green" disabled={busy} type="submit">{busy?'Sending…':'Resend verification →'}</button><p>Already verified? <a href="/login">Sign in.</a></p></form>;
+}

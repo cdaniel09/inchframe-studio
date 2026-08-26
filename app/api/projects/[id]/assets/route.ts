@@ -1,47 +1,9 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { addAsset,getProjectForUser,isStudioAdmin } from '@/lib/data';
-import { deleteStoredFile, writeStoredFile } from '@/lib/storage';
+import { deleteStoredFile,writeStoredFile } from '@/lib/storage';
 
-export const runtime = 'nodejs';
+export const runtime='nodejs';
 const IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp']);
 const VIDEO_TYPES=new Set(['video/mp4','video/webm']);
-
-export async function POST(request:Request,{params}:{params:Promise<{id:string}>}) {
-  const user=await getChatGPTUser();
-  if(!user)return Response.json({error:'Sign in required.'},{status:401});
-  if(request.headers.get('sec-fetch-site')==='cross-site')return Response.json({error:'Cross-site request rejected.'},{status:403});
-  const{id}=await params;
-  const project=await getProjectForUser(id,user);
-  if(!project)return Response.json({error:'Project not found.'},{status:404});
-  const admin=isStudioAdmin(user);
-  let form: FormData;
-  try {
-    form=await request.formData();
-  } catch {
-    return Response.json({error:'Invalid upload form.'},{status:400});
-  }
-  let kind=String(form.get('kind')||'seed');
-  if(!admin)kind='seed';
-  if(!['seed','review','deliverable'].includes(kind))return Response.json({error:'Invalid file type.'},{status:400});
-  const label=String(form.get('label')||'').trim().slice(0,120);
-  const files=form.getAll('files').filter((entry):entry is File=>entry instanceof File);
-  if(!files.length||files.length>12)return Response.json({error:'Choose between 1 and 12 files.'},{status:400});
-  let count=0;
-  for(const file of files){
-    const isImage=IMAGE_TYPES.has(file.type),isVideo=VIDEO_TYPES.has(file.type);
-    if(!isImage&&!(admin&&isVideo))return Response.json({error:`Unsupported file: ${file.name}`},{status:400});
-    const limit=isImage?15*1024*1024:100*1024*1024;
-    if(file.size>limit)return Response.json({error:`${file.name} exceeds the ${isImage?15:100} MB limit.`},{status:413});
-    const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'-').slice(-100) || 'upload';
-    const key=`projects/${id}/${kind}/${crypto.randomUUID()}-${safeName}`;
-    await writeStoredFile(key,new Uint8Array(await file.arrayBuffer()));
-    try{
-      await addAsset(user,id,{kind,objectKey:key,filename:file.name.slice(0,180),mimeType:file.type,byteSize:file.size,label});
-      count++;
-    }catch(error){
-      await deleteStoredFile(key);
-      throw error;
-    }
-  }
-  return Response.json({count},{status:201});
-}
+const AUDIO_TYPES=new Set(['audio/mpeg','audio/wav','audio/x-wav','audio/mp4','audio/x-m4a','audio/aac']);
+export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){const user=await getChatGPTUser();if(!user)return Response.json({error:'Sign in required.'},{status:401});if(request.headers.get('sec-fetch-site')==='cross-site')return Response.json({error:'Cross-site request rejected.'},{status:403});const{id}=await params;const project=await getProjectForUser(id,user);if(!project)return Response.json({error:'Project not found.'},{status:404});const admin=isStudioAdmin(user);if(!admin && (!project.advanced_unlocked_at || project.owner_id!==user.userId))return Response.json({error:'The Studio must accept and unlock this project before media uploads.'},{status:403});let form:FormData;try{form=await request.formData();}catch{return Response.json({error:'Invalid upload form.'},{status:400});}let kind=String(form.get('kind')||'seed');if(!admin&&!['seed','audio'].includes(kind))kind='seed';if(!['seed','audio','review','deliverable'].includes(kind))return Response.json({error:'Invalid file type.'},{status:400});const label=String(form.get('label')||'').trim().slice(0,120);const files=form.getAll('files').filter((entry):entry is File=>entry instanceof File);if(!files.length||files.length>12)return Response.json({error:'Choose between 1 and 12 files.'},{status:400});let count=0;for(const file of files){const isImage=IMAGE_TYPES.has(file.type),isVideo=VIDEO_TYPES.has(file.type),isAudio=AUDIO_TYPES.has(file.type);const matchesKind=kind==='audio'?isAudio:kind==='seed'?isImage:admin&&(isImage||isVideo);if(!matchesKind)return Response.json({error:`Unsupported file for ${kind}: ${file.name}`},{status:400});const limit=isImage?15*1024*1024:isAudio?50*1024*1024:100*1024*1024;if(file.size>limit)return Response.json({error:`${file.name} exceeds the ${isImage?15:isAudio?50:100} MB limit.`},{status:413});const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'-').slice(-100)||'upload';const key=`projects/${id}/${kind}/${crypto.randomUUID()}-${safeName}`;await writeStoredFile(key,new Uint8Array(await file.arrayBuffer()));try{await addAsset(user,id,{kind,objectKey:key,filename:file.name.slice(0,180),mimeType:file.type,byteSize:file.size,label});count++;}catch(error){await deleteStoredFile(key);throw error;}}return Response.json({count},{status:201});}
