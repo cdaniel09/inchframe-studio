@@ -5,7 +5,62 @@ import { useRouter } from 'next/navigation';
 const DRAFT_KEY='inchframe-studio-inquiry-draft';
 type Draft={title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string;budgetRange:string};
 
-export function IntakeForm(){const router=useRouter();const formRef=useRef<HTMLFormElement>(null);const[busy,setBusy]=useState(false);const[error,setError]=useState('');
-useEffect(()=>{try{const raw=sessionStorage.getItem(DRAFT_KEY);if(!raw||!formRef.current)return;const draft=JSON.parse(raw) as Partial<Draft>;for(const[key,value]of Object.entries(draft)){const control=formRef.current.elements.namedItem(key);if((control instanceof HTMLInputElement||control instanceof HTMLTextAreaElement||control instanceof HTMLSelectElement)&&typeof value==='string')control.value=value;}}catch{sessionStorage.removeItem(DRAFT_KEY);}},[]);
-async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');const form=new FormData(event.currentTarget);const draft:Draft={title:String(form.get('title')||''),projectType:String(form.get('projectType')||''),brief:String(form.get('brief')||''),audience:String(form.get('audience')||''),platforms:String(form.get('platforms')||''),dueDate:String(form.get('dueDate')||''),budgetRange:String(form.get('budgetRange')||'')};sessionStorage.setItem(DRAFT_KEY,JSON.stringify(draft));try{const response=await fetch('/api/projects',{method:'POST',credentials:'include',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify({...draft,dueDate:draft.dueDate||null,companyWebsite:form.get('companyWebsite')})});if(response.status===401){window.location.assign('/login?returnTo=%2Fstart&error=session');return;}const result=await response.json() as {id?:string;error?:string;emailSent?:boolean};if(!response.ok||!result.id)throw new Error(result.error||'Could not submit your inquiry.');sessionStorage.removeItem(DRAFT_KEY);if(result.emailSent===false)window.alert('Your inquiry was saved, but the email notification could not be sent. The Studio can still see it in the portal.');router.push(`/portal/projects/${result.id}`);router.refresh();}catch(reason){setError(reason instanceof Error?reason.message:'Something went wrong.');setBusy(false);}}
-return <form ref={formRef} className="intake-form" onSubmit={submit}><div className="form-section"><span className="form-step">01</span><div><h2>The essentials</h2><p>A quick first look for scope, fit, timing, and budget.</p></div></div><div className="form-grid"><label><span>Project title</span><input name="title" required maxLength={120} placeholder="After Midnight"/></label><label><span>Project type</span><select name="projectType" required defaultValue=""><option value="" disabled>Select one</option><option value="music_video">Music video</option><option value="visualizer">Visualizer / lyric piece</option><option value="brand_film">Brand or product film</option><option value="launch_clip">Launch / social clip</option><option value="other">Other</option></select></label><label className="wide"><span>What should the video communicate?</span><textarea name="brief" required maxLength={1500} rows={5} placeholder="The goal, story, feeling, and what success looks like…"/></label><label><span>Who is it for?</span><input name="audience" maxLength={300} placeholder="Fans, customers, investors…"/></label><label><span>Where will it run?</span><input name="platforms" maxLength={300} placeholder="YouTube, Instagram, landing page…"/></label><label><span>Ideal delivery date</span><input name="dueDate" type="date"/></label><label><span>Working budget</span><select name="budgetRange" required defaultValue=""><option value="" disabled>Select a range</option><option value="under_500">Under $500</option><option value="500_1000">$500–$1,000</option><option value="1000_2500">$1,000–$2,500</option><option value="2500_5000">$2,500–$5,000</option><option value="5000_plus">$5,000+</option></select></label><label className="bot-field" aria-hidden="true"><span>Company website</span><input name="companyWebsite" tabIndex={-1} autoComplete="off"/></label></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="inquiry-note"><strong>No uploads yet.</strong><p>If the project is a fit, the Studio will email a one-time code that unlocks image, audio, references, and the detailed questionnaire.</p></div><div className="submit-row"><p>Your inquiry stays private in your client account.</p><button className="button button-green" disabled={busy} type="submit">{busy?'Sending inquiry…':'Submit inquiry →'}</button></div></form>}
+export function IntakeForm({creatorSlug=''}:{creatorSlug?:string}){
+  const router=useRouter();
+  const formRef=useRef<HTMLFormElement>(null);
+  const[busy,setBusy]=useState(false);
+  const[error,setError]=useState('');
+
+  useEffect(()=>{
+    try{
+      const raw=sessionStorage.getItem(DRAFT_KEY);
+      if(!raw||!formRef.current)return;
+      const draft=JSON.parse(raw) as Partial<Draft>;
+      for(const[key,value]of Object.entries(draft)){
+        const control=formRef.current.elements.namedItem(key);
+        if((control instanceof HTMLInputElement||control instanceof HTMLTextAreaElement||control instanceof HTMLSelectElement)&&typeof value==='string')control.value=value;
+      }
+    }catch{sessionStorage.removeItem(DRAFT_KEY);}
+  },[]);
+
+  async function submit(event:React.FormEvent<HTMLFormElement>){
+    event.preventDefault();setBusy(true);setError('');
+    const form=new FormData(event.currentTarget);
+    const draft:Draft={
+      title:String(form.get('title')||''),projectType:String(form.get('projectType')||''),
+      brief:String(form.get('brief')||''),audience:String(form.get('audience')||''),
+      platforms:String(form.get('platforms')||''),dueDate:String(form.get('dueDate')||''),
+      budgetRange:String(form.get('budgetRange')||'')
+    };
+    sessionStorage.setItem(DRAFT_KEY,JSON.stringify(draft));
+    try{
+      const response=await fetch('/api/projects',{
+        method:'POST',credentials:'include',cache:'no-store',headers:{'content-type':'application/json'},
+        body:JSON.stringify({...draft,dueDate:draft.dueDate||null,creatorSlug,companyWebsite:form.get('companyWebsite')})
+      });
+      if(response.status===401){window.location.assign('/login?returnTo=%2Fstart&error=session');return;}
+      const result=await response.json() as {id?:string;error?:string;emailSent?:boolean};
+      if(!response.ok||!result.id)throw new Error(result.error||'Could not submit your inquiry.');
+      sessionStorage.removeItem(DRAFT_KEY);
+      if(result.emailSent===false)window.alert('Your inquiry was saved, but the email notification could not be sent. It is still available in the portal.');
+      router.push(`/portal/projects/${result.id}`);router.refresh();
+    }catch(reason){setError(reason instanceof Error?reason.message:'Something went wrong.');setBusy(false);}
+  }
+
+  return <form ref={formRef} className="intake-form" onSubmit={submit}>
+    <div className="form-section"><span className="form-step">01</span><div><h2>The essentials</h2><p>A quick first look for scope, fit, timing, and budget.</p></div></div>
+    <div className="form-grid">
+      <label><span>Project title</span><input name="title" required maxLength={120} placeholder="After Midnight"/></label>
+      <label><span>Project type</span><select name="projectType" required defaultValue=""><option value="" disabled>Select one</option><option value="music_video">Music video</option><option value="visualizer">Visualizer / lyric piece</option><option value="brand_film">Brand or product film</option><option value="launch_clip">Launch / social clip</option><option value="other">Other</option></select></label>
+      <label className="wide"><span>What should the video communicate?</span><textarea name="brief" required maxLength={1500} rows={5} placeholder="The goal, story, feeling, and what success looks like…"/></label>
+      <label><span>Who is it for?</span><input name="audience" maxLength={300} placeholder="Fans, customers, investors…"/></label>
+      <label><span>Where will it run?</span><input name="platforms" maxLength={300} placeholder="YouTube, Instagram, landing page…"/></label>
+      <label><span>Ideal delivery date</span><input name="dueDate" type="date"/></label>
+      <label><span>Working budget</span><select name="budgetRange" required defaultValue=""><option value="" disabled>Select a range</option><option value="under_500">Under $500</option><option value="500_1000">$500–$1,000</option><option value="1000_2500">$1,000–$2,500</option><option value="2500_5000">$2,500–$5,000</option><option value="5000_plus">$5,000+</option></select></label>
+      <label className="bot-field" aria-hidden="true"><span>Company website</span><input name="companyWebsite" tabIndex={-1} autoComplete="off"/></label>
+    </div>
+    {error&&<p className="form-error" role="alert">{error}</p>}
+    <div className="inquiry-note"><strong>No uploads yet.</strong><p>{creatorSlug?'Your selected creator will review this brief and send a private quote.':'Inchframe will route a fit project to one certified creator—never an open bidding pool.'}</p></div>
+    <div className="submit-row"><p>Creator contact and negotiation stay private inside Studio.</p><button className="button button-green" disabled={busy} type="submit">{busy?'Sending inquiry…':'Submit inquiry →'}</button></div>
+  </form>;
+}

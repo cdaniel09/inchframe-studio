@@ -27,6 +27,16 @@ services:
         value: info@inchframe.com
       - key: CREATOR_INVITE_SECRET
         sync: false
+      - key: STUDIO_MIN_PROJECT_CENTS
+        value: 30000
+      - key: STUDIO_REVIEW_THRESHOLD_CENTS
+        value: 1000000
+      - key: STUDIO_PLATFORM_FEE_BPS
+        value: 2000
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: ADMIN_PASSWORD_HASH
         sync: false
       - key: SMTP_HOST

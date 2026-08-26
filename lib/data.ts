@@ -10,13 +10,17 @@ export type StudioProject = {
   brief:string; audience:string; platforms:string; due_date:string|null; aspect_ratios:string; style_notes:string;
   budget_range:string; accepted_at:string|null; declined_at:string|null; access_code_hash:string|null;
   access_code_expires_at:string|null; advanced_unlocked_at:string|null; advanced_brief:string; must_have:string;
-  avoid_notes:string; reference_links:string; audio_notes:string; requested_creator:string; created_at:string; updated_at:string;
+  avoid_notes:string; reference_links:string; audio_notes:string; requested_creator:string; requested_creator_id:string|null;
+  assigned_creator_id:string|null; created_at:string; updated_at:string;
 };
 export type StudioAsset = {id:string;project_id:string;uploaded_by_id:string;uploaded_by_email:string;kind:string;object_key:string;filename:string;mime_type:string;byte_size:number;label:string;version:number;status:string;created_at:string};
 export type StudioComment = {id:string;project_id:string;asset_id:string|null;author_id:string;author_email:string;body:string;created_at:string};
 export type StudioAccount = {id:string;email:string;display_name:string;password_hash:string;role:'client';email_verified_at:string|null;verification_token_hash:string|null;verification_expires_at:string|null;created_at:string};
 export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
 export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
+export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
+export type QuoteOffer={id:string;quote_id:string;actor_id:string;actor_role:'creator'|'client';amount_cents:number;note:string;created_at:string};
+export type ProjectQuoteBundle={quote:ProjectQuote;offers:QuoteOffer[];creator:CreatorProfile};
 
 const globalForStudio = globalThis as typeof globalThis & {inchframeStudioDb?: DatabaseSync; inchframeSchemaReady?: boolean};
 
@@ -114,6 +118,22 @@ export async function ensureSchema() {
       id TEXT PRIMARY KEY, creator_id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, sort_order INTEGER NOT NULL,
       FOREIGN KEY(creator_id) REFERENCES creator_profiles(id) ON DELETE CASCADE, UNIQUE(creator_id,sort_order)
     );
+    CREATE TABLE IF NOT EXISTS project_quotes (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, creator_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'awaiting_creator' CHECK(status IN ('awaiting_creator','awaiting_customer','admin_review','accepted','declined')),
+      amount_cents INTEGER NOT NULL DEFAULT 0, deposit_cents INTEGER NOT NULL DEFAULT 0, counter_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT, latest_actor TEXT NOT NULL DEFAULT '', latest_note TEXT NOT NULL DEFAULT '',
+      stripe_checkout_session_id TEXT, stripe_payment_intent_id TEXT, deposit_paid_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(creator_id) REFERENCES creator_profiles(id) ON DELETE RESTRICT
+    );
+    CREATE TABLE IF NOT EXISTS quote_offers (
+      id TEXT PRIMARY KEY, quote_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+      actor_role TEXT NOT NULL CHECK(actor_role IN ('creator','client')), amount_cents INTEGER NOT NULL,
+      note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+      FOREIGN KEY(quote_id) REFERENCES project_quotes(id) ON DELETE CASCADE
+    );
   `);
 
   const userColumns=columns('users');
@@ -133,6 +153,8 @@ export async function ensureSchema() {
   addColumn('projects',projectColumns,'reference_links',"TEXT NOT NULL DEFAULT ''");
   addColumn('projects',projectColumns,'audio_notes',"TEXT NOT NULL DEFAULT ''");
   addColumn('projects',projectColumns,'requested_creator',"TEXT NOT NULL DEFAULT ''");
+  addColumn('projects',projectColumns,'requested_creator_id','TEXT');
+  addColumn('projects',projectColumns,'assigned_creator_id','TEXT');
   if(addedUnlock) db.prepare('UPDATE projects SET advanced_unlocked_at=created_at WHERE advanced_unlocked_at IS NULL').run();
 
   const creatorColumns=columns('creator_profiles');
@@ -150,6 +172,10 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_creator_profiles_status_updated ON creator_profiles(status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_creator_samples_creator_sort ON creator_samples(creator_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_projects_requested_creator ON projects(requested_creator_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_projects_assigned_creator ON projects(assigned_creator_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_project_quotes_creator_status ON project_quotes(creator_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_quote_offers_quote_created ON quote_offers(quote_id, created_at);
     PRAGMA optimize;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_profiles_invite_hash ON creator_profiles(creator_invite_hash) WHERE creator_invite_hash IS NOT NULL;
   `);
@@ -200,7 +226,7 @@ export async function deleteStudioSession(tokenHash:string) {
 }
 
 function withCreatorSamples(profile:Omit<CreatorProfile,'samples'>&{creator_invite_hash?:string}):CreatorProfile {
-  const samples=database().prepare('SELECT * FROM creator_samples WHERE creator_id=? ORDER BY sort_order').all(profile.id) as unknown as CreatorSample[];
+  const samples=(database().prepare('SELECT * FROM creator_samples WHERE creator_id=? ORDER BY sort_order').all(profile.id) as unknown as CreatorSample[]).map(sample=>({...sample}));
   const publicProfile={...profile};delete publicProfile.creator_invite_hash;return {...publicProfile,samples};
 }
 
@@ -316,11 +342,16 @@ export async function verifyStudioAccount(tokenHash:string) {
   return {...account,email_verified_at:now,verification_token_hash:null,verification_expires_at:null};
 }
 
-export async function createProject(user:ChatGPTUser,input:{title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string;requestedCreator?:string}) {
+export async function createProject(user:ChatGPTUser,input:{title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string;requestedCreator?:CreatorProfile|null}) {
   await ensureSchema();
-  const id=crypto.randomUUID(),now=new Date().toISOString();
-  database().prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,requested_creator,created_at,updated_at) VALUES (?,?,?,?,?,'inquiry_received',?,?,?,?, '[]','',?,?,?,?)`)
-    .run(id,user.userId,user.email,input.title,input.projectType,input.brief,input.audience,input.platforms,input.dueDate,input.budgetRange,input.requestedCreator||'',now,now);
+  const id=crypto.randomUUID(),now=new Date().toISOString(),db=database();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,requested_creator,requested_creator_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'[]','',?,?,?,?,?)`)
+      .run(id,user.userId,user.email,input.title,input.projectType,input.requestedCreator?'creator_requested':'inquiry_received',input.brief,input.audience,input.platforms,input.dueDate,input.budgetRange,input.requestedCreator?.display_name||'',input.requestedCreator?.id||null,now,now);
+    if(input.requestedCreator) db.prepare(`INSERT INTO project_quotes (id,project_id,creator_id,status,created_at,updated_at) VALUES (?,?,?,'awaiting_creator',?,?)`).run(crypto.randomUUID(),id,input.requestedCreator.id,now,now);
+    db.exec('COMMIT');
+  } catch(error){db.exec('ROLLBACK');throw error;}
   return id;
 }
 
@@ -330,18 +361,151 @@ export async function listProjects(user:ChatGPTUser) {
   return rows as unknown as StudioProject[];
 }
 
+export async function listCreatorProjects(user:ChatGPTUser) {
+  await ensureSchema();
+  const profile=database().prepare(`SELECT id FROM creator_profiles WHERE user_id=? AND status='approved'`).get(user.userId) as {id:string}|undefined;
+  if(!profile)return [];
+  return database().prepare(`SELECT p.* FROM projects p JOIN project_quotes q ON q.project_id=p.id WHERE q.creator_id=? ORDER BY p.updated_at DESC`).all(profile.id) as unknown as StudioProject[];
+}
+
 export async function getProjectForUser(projectId:string,user:ChatGPTUser) {
   await ensureSchema();
   const project=database().prepare('SELECT * FROM projects WHERE id=?').get(projectId) as StudioProject|undefined;
-  return project && (project.owner_id===user.userId || isStudioAdmin(user)) ? project : null;
+  if(!project)return null;
+  if(project.owner_id===user.userId||isStudioAdmin(user))return project;
+  const creator=database().prepare(`SELECT cp.id FROM creator_profiles cp JOIN project_quotes q ON q.creator_id=cp.id WHERE cp.user_id=? AND q.project_id=?`).get(user.userId,projectId);
+  return creator?project:null;
 }
 
 export async function getProjectBundle(projectId:string,user:ChatGPTUser) {
   const project=await getProjectForUser(projectId,user);
   if(!project)return null;
   const assets=database().prepare('SELECT * FROM assets WHERE project_id=? ORDER BY created_at DESC').all(projectId) as unknown as StudioAsset[];
-  const comments=database().prepare('SELECT * FROM comments WHERE project_id=? ORDER BY created_at ASC').all(projectId) as unknown as StudioComment[];
-  return {project,assets,comments};
+  const rawComments=database().prepare('SELECT * FROM comments WHERE project_id=? ORDER BY created_at ASC').all(projectId) as unknown as StudioComment[];
+  const comments=isStudioAdmin(user)?rawComments:rawComments.map(comment=>({...comment,author_email:comment.author_id===project.owner_id?'Project client':'Studio production'}));
+  const quote=await getProjectQuoteBundle(projectId);
+  return {project,assets,comments,quote};
+}
+
+export function studioMinimumCents(){const configured=Number(process.env.STUDIO_MIN_PROJECT_CENTS||30000);return Number.isInteger(configured)&&configured>=100?configured:30000;}
+export function quoteReviewThresholdCents(){const configured=Number(process.env.STUDIO_REVIEW_THRESHOLD_CENTS||1000000);return Number.isInteger(configured)&&configured>=studioMinimumCents()?configured:1000000;}
+export function platformFeeBps(){const configured=Number(process.env.STUDIO_PLATFORM_FEE_BPS||2000);return Number.isInteger(configured)&&configured>=0&&configured<10000?configured:2000;}
+export function projectDepositCents(amountCents:number){if(amountCents<50000)return amountCents;if(amountCents<100000)return Math.ceil(amountCents*.5);return Math.ceil(amountCents*.4);}
+
+export async function getProjectQuoteBundle(projectId:string):Promise<ProjectQuoteBundle|null>{
+  await ensureSchema();
+  const quote=database().prepare('SELECT * FROM project_quotes WHERE project_id=?').get(projectId) as ProjectQuote|undefined;
+  if(!quote)return null;
+  const creatorRow=database().prepare('SELECT * FROM creator_profiles WHERE id=?').get(quote.creator_id) as Omit<CreatorProfile,'samples'>|undefined;
+  if(!creatorRow)return null;
+  const offers=(database().prepare('SELECT * FROM quote_offers WHERE quote_id=? ORDER BY created_at').all(quote.id) as unknown as QuoteOffer[]).map(offer=>({...offer}));
+  return {quote:{...quote},offers,creator:withCreatorSamples(creatorRow)};
+}
+
+export async function assignCreatorToProject(projectId:string,creatorId:string){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const creator=db.prepare(`SELECT id,display_name FROM creator_profiles WHERE id=? AND status='approved' AND pro_verified=1 AND identity_verified=1 AND tax_verified=1`).get(creatorId) as {id:string;display_name:string}|undefined;
+  if(!creator)throw new Error('Choose a fully verified, approved creator.');
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const existing=db.prepare('SELECT id,status FROM project_quotes WHERE project_id=?').get(projectId) as {id:string;status:string}|undefined;
+    if(existing&&existing.status==='accepted')throw new Error('The accepted creator assignment cannot be replaced.');
+    if(existing){db.prepare(`UPDATE project_quotes SET creator_id=?,status='awaiting_creator',amount_cents=0,deposit_cents=0,counter_count=0,expires_at=NULL,latest_actor='',latest_note='',updated_at=? WHERE id=?`).run(creatorId,now,existing.id);db.prepare('DELETE FROM quote_offers WHERE quote_id=?').run(existing.id);}
+    else db.prepare(`INSERT INTO project_quotes (id,project_id,creator_id,status,created_at,updated_at) VALUES (?,?,?,'awaiting_creator',?,?)`).run(crypto.randomUUID(),projectId,creatorId,now,now);
+    db.prepare(`UPDATE projects SET requested_creator=?,requested_creator_id=?,status='creator_requested',updated_at=? WHERE id=?`).run(creator.display_name,creatorId,now,projectId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function submitCreatorQuote(projectId:string,user:ChatGPTUser,input:{amountCents:number;note:string}){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const row=db.prepare(`SELECT q.*,p.due_date,cp.user_id,cp.rate_min FROM project_quotes q JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`).get(projectId) as (ProjectQuote&{due_date:string|null;user_id:string;rate_min:number})|undefined;
+  if(!row||row.user_id!==user.userId)throw new Error('This quote request is not assigned to your creator profile.');
+  if(row.status!=='awaiting_creator')throw new Error('This quote is not waiting for a creator offer.');
+  const minimum=Math.max(studioMinimumCents(),row.rate_min*100);
+  if(!Number.isInteger(input.amountCents)||input.amountCents<minimum)throw new Error(`The minimum customer price is $${(minimum/100).toLocaleString('en-US')}.`);
+  const rush=Boolean(row.due_date&&new Date(`${row.due_date}T23:59:59Z`).getTime()-Date.now()<7*24*60*60*1000);
+  const status=input.amountCents>=quoteReviewThresholdCents()||rush?'admin_review':'awaiting_customer';
+  const expiresAt=new Date(Date.now()+7*24*60*60*1000).toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    db.prepare('INSERT INTO quote_offers (id,quote_id,actor_id,actor_role,amount_cents,note,created_at) VALUES (?,?,?,?,?,?,?)').run(crypto.randomUUID(),row.id,user.userId,'creator',input.amountCents,input.note,now);
+    db.prepare('UPDATE project_quotes SET status=?,amount_cents=?,deposit_cents=?,expires_at=?,latest_actor=?,latest_note=?,updated_at=? WHERE id=?').run(status,input.amountCents,projectDepositCents(input.amountCents),expiresAt,'creator',input.note,now,row.id);
+    db.prepare('UPDATE projects SET status=?,updated_at=? WHERE id=?').run(status==='admin_review'?'quote_admin_review':'quote_ready',now,projectId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+  return status;
+}
+
+export async function counterProjectQuote(projectId:string,user:ChatGPTUser,input:{amountCents:number;note:string}){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const row=db.prepare(`SELECT q.*,p.owner_id,cp.rate_min FROM project_quotes q JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`).get(projectId) as (ProjectQuote&{owner_id:string;rate_min:number})|undefined;
+  if(!row||row.owner_id!==user.userId)throw new Error('Only the project owner can counter this quote.');
+  if(row.status!=='awaiting_customer')throw new Error('This quote is not available for a counteroffer.');
+  if(row.counter_count>=2)throw new Error('The two-round counteroffer limit has been reached.');
+  const minimum=Math.max(studioMinimumCents(),row.rate_min*100);
+  if(!Number.isInteger(input.amountCents)||input.amountCents<minimum)throw new Error(`The minimum customer price is $${(minimum/100).toLocaleString('en-US')}.`);
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    db.prepare('INSERT INTO quote_offers (id,quote_id,actor_id,actor_role,amount_cents,note,created_at) VALUES (?,?,?,?,?,?,?)').run(crypto.randomUUID(),row.id,user.userId,'client',input.amountCents,input.note,now);
+    db.prepare(`UPDATE project_quotes SET status='awaiting_creator',amount_cents=?,deposit_cents=?,counter_count=counter_count+1,expires_at=?,latest_actor='client',latest_note=?,updated_at=? WHERE id=?`).run(input.amountCents,projectDepositCents(input.amountCents),new Date(Date.now()+7*24*60*60*1000).toISOString(),input.note,now,row.id);
+    db.prepare(`UPDATE projects SET status='quote_negotiation',updated_at=? WHERE id=?`).run(now,projectId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function approveProjectQuote(projectId:string){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const result=db.prepare(`UPDATE project_quotes SET status='awaiting_customer',latest_actor='admin',updated_at=? WHERE project_id=? AND status='admin_review'`).run(now,projectId);
+  if(result.changes!==1)throw new Error('No quote is waiting for admin review.');
+  db.prepare(`UPDATE projects SET status='quote_ready',updated_at=? WHERE id=?`).run(now,projectId);
+}
+
+export async function acceptProjectQuote(projectId:string,user:ChatGPTUser){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const row=db.prepare(`SELECT q.*,p.owner_id FROM project_quotes q JOIN projects p ON p.id=q.project_id WHERE q.project_id=?`).get(projectId) as (ProjectQuote&{owner_id:string})|undefined;
+  if(!row||row.owner_id!==user.userId)throw new Error('Only the project owner can accept this quote.');
+  if(row.status!=='awaiting_customer')throw new Error('This quote is not available to accept.');
+  if(row.expires_at&&row.expires_at<=now)throw new Error('This quote has expired. Ask the creator for a fresh quote.');
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    db.prepare(`UPDATE project_quotes SET status='accepted',latest_actor='client',updated_at=? WHERE id=?`).run(now,row.id);
+    db.prepare(`UPDATE projects SET assigned_creator_id=?,status='deposit_required',accepted_at=?,updated_at=? WHERE id=?`).run(row.creator_id,now,now,projectId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function declineProjectQuote(projectId:string,user:ChatGPTUser){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  const row=db.prepare(`SELECT q.id,q.deposit_paid_at,p.owner_id,cp.user_id creator_user_id FROM project_quotes q JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`).get(projectId) as {id:string;deposit_paid_at:string|null;owner_id:string;creator_user_id:string}|undefined;
+  if(!row||(!isStudioAdmin(user)&&row.owner_id!==user.userId&&row.creator_user_id!==user.userId))throw new Error('You cannot decline this quote.');
+  if(row.deposit_paid_at)throw new Error('A funded assignment cannot be closed as a quote. Contact the Studio for cancellation or refund review.');
+  db.prepare(`UPDATE project_quotes SET status='declined',latest_actor=?,updated_at=? WHERE id=?`).run(isStudioAdmin(user)?'admin':row.owner_id===user.userId?'client':'creator',now,row.id);
+  db.prepare(`UPDATE projects SET status='quote_declined',assigned_creator_id=NULL,updated_at=? WHERE id=?`).run(now,projectId);
+}
+
+export async function recordCheckoutSession(projectId:string,user:ChatGPTUser,sessionId:string){
+  await ensureSchema();
+  const result=database().prepare(`UPDATE project_quotes SET stripe_checkout_session_id=?,updated_at=? WHERE project_id=? AND status='accepted' AND deposit_paid_at IS NULL AND EXISTS (SELECT 1 FROM projects p WHERE p.id=project_quotes.project_id AND p.owner_id=?)`).run(sessionId,new Date().toISOString(),projectId,user.userId);
+  return result.changes===1;
+}
+
+export async function markProjectDepositPaid(input:{projectId:string;quoteId:string;checkoutSessionId:string;paymentIntentId:string|null}){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const result=db.prepare(`UPDATE project_quotes SET deposit_paid_at=COALESCE(deposit_paid_at,?),stripe_checkout_session_id=?,stripe_payment_intent_id=?,updated_at=? WHERE id=? AND project_id=? AND status='accepted'`).run(now,input.checkoutSessionId,input.paymentIntentId,now,input.quoteId,input.projectId);
+    if(result.changes===1)db.prepare(`UPDATE projects SET status='advanced_intake',advanced_unlocked_at=COALESCE(advanced_unlocked_at,?),updated_at=? WHERE id=?`).run(now,now,input.projectId);
+    db.exec('COMMIT');
+    return result.changes===1;
+  }catch(error){db.exec('ROLLBACK');throw error;}
 }
 
 export async function acceptProject(projectId:string,accessCodeHash:string,expiresAt:string) {
@@ -389,7 +553,9 @@ export async function addAsset(user:ChatGPTUser,projectId:string,input:{kind:str
 
 export async function getAssetForUser(assetId:string,user:ChatGPTUser) {
   await ensureSchema();
-  return (database().prepare('SELECT a.* FROM assets a JOIN projects p ON p.id=a.project_id WHERE a.id=? AND (p.owner_id=? OR ?=1)').get(assetId,user.userId,isStudioAdmin(user)?1:0) as StudioAsset|undefined) ?? null;
+  const asset=database().prepare('SELECT * FROM assets WHERE id=?').get(assetId) as StudioAsset|undefined;
+  if(!asset)return null;
+  return await getProjectForUser(asset.project_id,user)?asset:null;
 }
 
 export async function addComment(user:ChatGPTUser,projectId:string,assetId:string|null,body:string) {

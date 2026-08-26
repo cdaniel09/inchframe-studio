@@ -6,9 +6,13 @@ The Inchframe Studio sales site and private client production portal. It runs as
 
 1. A new customer creates an account with name, email, and password—no invitation code.
 2. The customer verifies their email, signs in, and submits a short inquiry without uploads.
-3. The Studio admin reviews the inquiry in `/portal` and accepts or declines it.
-4. Acceptance emails a one-time, project-specific code that expires after 14 days.
-5. The customer enters the code once to unlock that project’s detailed questionnaire, image seeds, audio, reviews, and delivery area.
+3. The customer requests a certified creator, or chooses **Match Me** so the Studio routes the brief to one creator.
+4. The creator sends the customer-facing quote. The customer can accept, decline, or make up to two structured counteroffers.
+5. Quotes below the platform/creator minimum are rejected automatically. High-value or rush quotes receive an admin exception check, but the admin does not set the price.
+6. An accepted quote opens Stripe Checkout for the required project payment: full payment below $500, 50% from $500–$999, and 40% at $1,000+.
+7. A signed Stripe webhook records payment, locks the creator assignment, and opens the advanced questionnaire, media, review, and delivery workspace.
+
+The older one-time access-code flow remains available to the admin as a manual exception for legacy inquiries.
 
 ## Local setup
 
@@ -18,7 +22,8 @@ The Inchframe Studio sales site and private client production portal. It runs as
 4. Generate the admin hash with `npm run hash-password -- "your-long-password"` and paste the output into `ADMIN_PASSWORD_HASH`.
 5. Replace `AUTH_SECRET` with a private random value.
 6. Configure the SMTP variables, or set `EMAIL_TRANSPORT=console` for local-only email-link testing.
-7. Run `npm run dev` and open `http://localhost:3000`.
+7. Add Stripe test keys and forward Stripe CLI events to `http://localhost:3000/api/stripe/webhook`.
+8. Run `npm run dev` and open `http://localhost:3000`.
 
 The local SQLite database and uploads are created automatically in `data/`.
 
@@ -30,8 +35,13 @@ Add these secret values in Render:
 
 - `ADMIN_PASSWORD_HASH` — generate it locally with the command above.
 - `SMTP_PASS` — the mailbox password for `info@inchframe.com`, not the Hostinger account password.
+- `STRIPE_SECRET_KEY` — the live secret key for the Inchframe platform account.
+- `STRIPE_WEBHOOK_SECRET` — the signing secret for the live Studio webhook endpoint.
+- `CREATOR_INVITE_SECRET` — the same signing secret used by the paid Inchframe account service.
 
 The Blueprint supplies `smtp.hostinger.com`, port `465`, `info@inchframe.com`, and the public Studio URL. Render generates `AUTH_SECRET` automatically. Never put real passwords or secret values in Git.
+
+In Stripe Workbench, create a webhook endpoint at `https://studio.inchframe.com/api/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Deposit Checkout is implemented against the platform account. Connected-account onboarding and automated creator transfers should be enabled only after the production Connect account configuration is approved; until then, creator payout remains an admin accounting step.
 
 After the service is live, add `studio.inchframe.com` as a custom domain and point its DNS record to the value Render provides.
 
