@@ -605,13 +605,13 @@ export async function saveProStudioProposal(projectId:string,user:ChatGPTUser,in
   await ensureSchema();
   const db=database(),partner=verifiedStudioPartnerForUser(user.userId);
   if(!partner)throw new Error('Only verified Studio Partners can respond to Pro Studio opportunities.');
-  const project=db.prepare(`SELECT marketplace_status,marketplace_expires_at FROM projects WHERE id=?`).get(projectId) as {marketplace_status:string;marketplace_expires_at:string|null}|undefined;
+  const project=db.prepare(`SELECT title,marketplace_status,marketplace_expires_at FROM projects WHERE id=?`).get(projectId) as {title:string;marketplace_status:string;marketplace_expires_at:string|null}|undefined;
   if(!project||project.marketplace_status!=='published'||(project.marketplace_expires_at&&project.marketplace_expires_at<=new Date().toISOString()))throw new Error('This opportunity is no longer open.');
   const now=new Date().toISOString(),existing=db.prepare('SELECT id FROM pro_studio_proposals WHERE project_id=? AND creator_id=?').get(projectId,partner.id) as {id:string}|undefined;
   if(input.action==='withdraw'){
     if(!existing)throw new Error('No proposal is available to withdraw.');
     db.prepare(`UPDATE pro_studio_proposals SET status='withdrawn',updated_at=? WHERE id=?`).run(now,existing.id);
-    return;
+    return {title:project.title,partnerName:partner.display_name};
   }
   const minimum=Math.max(studioMinimumCents(),partner.rate_min*100);
   if(!Number.isInteger(input.amountCents)||input.amountCents<minimum)throw new Error(`The minimum customer price is $${(minimum/100).toLocaleString('en-US')}.`);
@@ -620,6 +620,7 @@ export async function saveProStudioProposal(projectId:string,user:ChatGPTUser,in
   if(!Number.isInteger(input.includedRevisions)||input.includedRevisions<0||input.includedRevisions>20)throw new Error('Included revisions must be between 0 and 20.');
   if(existing)db.prepare(`UPDATE pro_studio_proposals SET status='submitted',amount_cents=?,note=?,timeline_days=?,included_revisions=?,updated_at=? WHERE id=?`).run(input.amountCents,input.note.trim(),input.timelineDays,input.includedRevisions,now,existing.id);
   else db.prepare(`INSERT INTO pro_studio_proposals (id,project_id,creator_id,status,amount_cents,note,timeline_days,included_revisions,created_at,updated_at) VALUES (?,?,?,'submitted',?,?,?,?,?,?)`).run(crypto.randomUUID(),projectId,partner.id,input.amountCents,input.note.trim(),input.timelineDays,input.includedRevisions,now,now);
+  return {title:project.title,partnerName:partner.display_name};
 }
 
 export async function routeProStudioProposal(projectId:string,proposalId:string,user:ChatGPTUser){

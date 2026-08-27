@@ -13,8 +13,8 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
   let body:{creatorId?:string};try{body=await request.json() as {creatorId?:string};}catch{return Response.json({error:'Invalid request.'},{status:400});}
   const creatorId=String(body.creatorId||'').slice(0,100);
   const creator=await getCreatorApplicationById(creatorId);
-  if(!creator)return Response.json({error:'Creator not found.'},{status:404});
-  try{await assignCreatorToProject(id,creatorId);}catch(error){return Response.json({error:error instanceof Error?error.message:'Could not assign creator.'},{status:400});}
-  try{await sendProjectWorkflowEmail({to:creator.owner_email,subject:`New private project request: ${project.title}`,heading:'A project is waiting for your quote.',message:'Review the essential brief, then send the customer-facing total and any scope note inside Studio.',projectId:id});}catch(error){console.error('Creator assignment email failed',error);}
+  if(!creator)return Response.json({error:'Studio Partner not found.'},{status:404});
+  try{await assignCreatorToProject(id,creatorId);}catch(error){return Response.json({error:error instanceof Error?error.message:'Could not assign Studio Partner.'},{status:400});}
+  try{await sendProjectWorkflowEmail({to:creator.owner_email,subject:`New private project request: ${project.title}`,heading:'A project is waiting for your quote.',message:'Review the essential brief, then send the customer-facing total and any scope note inside Studio.',projectId:id});}catch(error){console.error('Studio Partner assignment email failed',error);}
   return Response.json({message:`Quote request sent to ${creator.display_name}.`});
 }

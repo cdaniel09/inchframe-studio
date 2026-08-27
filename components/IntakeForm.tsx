@@ -63,9 +63,9 @@ export function IntakeForm({creatorSlug=''}:{creatorSlug?:string}){
       <label><span>Where will it run?</span><input name="platforms" maxLength={300} placeholder="YouTube, Instagram, landing page…"/></label>
       <label><span>Ideal delivery date</span><input name="dueDate" type="date"/></label>
       <label><span>Working budget</span><select name="budgetRange" required defaultValue=""><option value="" disabled>Select a range</option><option value="under_500">Under $500</option><option value="500_1000">$500–$1,000</option><option value="1000_2500">$1,000–$2,500</option><option value="2500_5000">$2,500–$5,000</option><option value="5000_plus">$5,000+</option></select></label>
-      {!creatorSlug&&<fieldset className="wide routing-choice"><legend>How should Inchframe route this inquiry?</legend>
+      {!creatorSlug&&<fieldset className="wide routing-choice"><legend>Choose your production path</legend>
         <label><input name="routingMode" type="radio" value="match" defaultChecked/><span><strong>Private Studio match</strong><small>Inchframe selects one Studio Partner and requests a private quote.</small></span></label>
-        <label><input name="routingMode" type="radio" value="pro_studio"/><span><strong>Request Pro Studio</strong><small>After admin review, approved Studio Partners may send private proposals for Inchframe to route.</small></span></label>
+        <label><input name="routingMode" type="radio" value="pro_studio"/><span><strong>Request Pro Studio</strong><small>After Studio review, approved Studio Partners may send private proposals for Inchframe to consider.</small></span></label>
       </fieldset>}
       <label className="bot-field" aria-hidden="true"><span>Company website</span><input name="companyWebsite" tabIndex={-1} autoComplete="off"/></label>
     </div>

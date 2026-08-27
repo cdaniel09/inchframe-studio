@@ -1,5 +1,6 @@
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { checkRateLimit,saveProStudioProposal } from '@/lib/data';
+import { sendProjectWorkflowEmail } from '@/lib/email';
 export const runtime='nodejs';
 export async function POST(request:Request){
   const user=await getChatGPTUser();
@@ -12,7 +13,12 @@ export async function POST(request:Request){
   if(!projectId)return Response.json({error:'Project is required.'},{status:400});
   const amountDollars=Number(body.amountDollars),timelineDays=Number(body.timelineDays),includedRevisions=Number(body.includedRevisions);
   try{
-    await saveProStudioProposal(projectId,user,{action,amountCents:Math.round(amountDollars*100),note:String(body.note||'').trim().slice(0,2000),timelineDays,includedRevisions});
+    const saved=await saveProStudioProposal(projectId,user,{action,amountCents:Math.round(amountDollars*100),note:String(body.note||'').trim().slice(0,2000),timelineDays,includedRevisions});
+    const adminEmail=process.env.INQUIRY_NOTIFICATION_EMAIL?.trim()||process.env.ADMIN_EMAIL?.trim();
+    if(adminEmail)try{
+      const detail=action==='withdraw'?`${saved.partnerName} withdrew a private proposal.`:`${saved.partnerName} submitted or updated a private proposal for $${amountDollars.toLocaleString('en-US')} with a ${timelineDays}-day timeframe and ${includedRevisions} included revision${includedRevisions===1?'':'s'}.`;
+      await sendProjectWorkflowEmail({to:adminEmail,subject:`Pro Studio proposal activity: ${saved.title}`,heading:action==='withdraw'?'Private proposal withdrawn.':'Private proposal received.',message:detail,projectId});
+    }catch(error){console.error('Pro Studio proposal notification failed',error);}
     return Response.json({message:action==='withdraw'?'Proposal withdrawn.':'Private proposal saved.'});
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Could not save proposal.'},{status:400});}
 }

@@ -47,7 +47,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     if(body.action==='decline'){
       await declineProjectQuote(id,user);
       const other=user.userId===before.project.owner_id?before.quote?.creator.owner_email:before.project.owner_email;
-      if(other)await notify({to:other,subject:`Quote closed: ${before.project.title}`,heading:'This quote has been closed.',message:'The current creator quote is no longer active. The project remains in Studio for next-step review.',projectId:id});
+      if(other)await notify({to:other,subject:`Quote closed: ${before.project.title}`,heading:'This quote has been closed.',message:'The current Studio Partner quote is no longer active. The project remains in Studio for next-step review.',projectId:id});
       return Response.json({message:'Quote declined.'});
     }
     return Response.json({error:'Invalid quote action.'},{status:400});

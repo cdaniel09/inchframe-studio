@@ -22,7 +22,7 @@ export function ProStudioBoard({opportunities}:{opportunities:ProStudioOpportuni
     }catch(error){setMessage(error instanceof Error?error.message:'Could not save your proposal.');}
     finally{setBusy('');}
   }
-  if(!opportunities.length)return <div className="empty-state"><span>PRO STUDIO 00</span><h2>No opportunities are open right now.</h2><p>Inchframe publishes reviewed briefs here when a private Studio Partner proposal is appropriate.</p></div>;
+  if(!opportunities.length)return <div className="empty-state"><span>PRO STUDIO 00</span><h2>No opportunities are open right now.</h2><p>New opportunities appear here after Inchframe reviews a client brief.</p></div>;
   return <div className="project-sections">{opportunities.map(item=><article className="portal-card" key={item.id}>
     <div className="card-heading"><div><span>PRO STUDIO OPPORTUNITY</span><h2>{item.title}</h2></div><b>{titleCase(item.project_type)}</b></div>
     <div className="advanced-summary">
@@ -31,7 +31,7 @@ export function ProStudioBoard({opportunities}:{opportunities:ProStudioOpportuni
       <div><span>Working budget</span><p>{titleCase(item.budget_range)}</p></div><div><span>Closes</span><p>{shortDate(item.marketplace_expires_at)}</p></div>
     </div>
     <form className="admin-review proposal-form" onSubmit={event=>{event.preventDefault();void save(event.currentTarget,item.id,'submit')}}>
-      <div><strong>{item.proposal?'Your private proposal':'Send a private proposal'}</strong><p>Only Inchframe sees all proposals. Partners never see competing prices, bid counts, or client contact details.</p></div>
+      <div><strong>{item.proposal?'Your private proposal':'Send a private proposal'}</strong><p>Your proposal is private. Other partners cannot see your price, your response, or the client’s identity.</p></div>
       <div className="form-grid">
         <label><span>Customer price (USD)</span><input name="amountDollars" type="number" min="1" step="1" required defaultValue={item.proposal?item.proposal.amount_cents/100:''}/></label>
         <label><span>Production days</span><input name="timelineDays" type="number" min="1" max="365" required defaultValue={item.proposal?.timeline_days||14}/></label>

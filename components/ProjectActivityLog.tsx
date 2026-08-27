@@ -13,7 +13,7 @@ export function ProjectActivityLog({projectId,items,viewer}:{projectId:string;it
     <div className="communication-rule"><strong>Studio is the project communication record.</strong><p>Keep feedback, scope decisions, schedule changes, approvals, and delivery notices here. If something is discussed elsewhere, summarize it in this log.</p></div>
     <form className="activity-form" onSubmit={submit}>
       <label><span>Update type</span><select name="kind">{kinds.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-      <label><span>Action needed from</span><select name="needsResponseFrom" defaultValue="none"><option value="none">No response needed</option>{viewer!=='client'&&<option value="client">Client</option>}{viewer!=='creator'&&<option value="creator">Creator</option>}<option value="admin">Inchframe admin</option></select></label>
+      <label><span>Action needed from</span><select name="needsResponseFrom" defaultValue="none"><option value="none">No response needed</option>{viewer!=='client'&&<option value="client">Client</option>}{viewer!=='creator'&&<option value="creator">Studio Partner</option>}<option value="admin">Inchframe Studio</option></select></label>
       <label className="wide"><span>Short title</span><input name="title" required maxLength={140} placeholder="First cut ready / Need logo approval / Schedule risk"/></label>
       <label className="wide"><span>Update or message</span><textarea name="body" required maxLength={3000} rows={4}/></label>
       <label><span>Next step</span><input name="nextStep" maxLength={1000} placeholder="What happens next?"/></label>

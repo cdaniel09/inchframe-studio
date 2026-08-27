@@ -24,7 +24,9 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     await addProjectActivity(user,id,input);
     const adminEmail=process.env.INQUIRY_NOTIFICATION_EMAIL?.trim()||process.env.ADMIN_EMAIL?.trim();
     const recipient=needsResponseFrom==='client'?bundle.project.owner_email:needsResponseFrom==='creator'?bundle.quote?.creator.owner_email:needsResponseFrom==='admin'?adminEmail:undefined;
-    if(recipient)try{await sendProjectWorkflowEmail({to:recipient,subject:`Action needed: ${bundle.project.title}`,heading:input.title,message:`${input.body}${input.nextStep?`\n\nNext: ${input.nextStep}`:''}`,projectId:id});}catch(error){console.error('Project activity email failed',error);}
+    const message=`${input.body}${input.nextStep?`\n\nNext: ${input.nextStep}`:''}`;
+    if(!isStudioAdmin(user)&&adminEmail)try{await sendProjectWorkflowEmail({to:adminEmail,subject:`Project activity: ${bundle.project.title}`,heading:`${user.displayName} posted ${kind.replaceAll('_',' ')}.`,message:`${input.title}\n\n${message}`,projectId:id});}catch(error){console.error('Admin activity notification failed',error);}
+    if(recipient&&!(recipient===adminEmail&&!isStudioAdmin(user)))try{await sendProjectWorkflowEmail({to:recipient,subject:`Action needed: ${bundle.project.title}`,heading:input.title,message,projectId:id});}catch(error){console.error('Project activity email failed',error);}
     return Response.json({message:isStudioAdmin(user)&&needsResponseFrom==='admin'?'Admin action logged.':'Project update posted.'});
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Could not update the project log.'},{status:400});}
 }

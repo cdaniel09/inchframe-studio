@@ -16,7 +16,7 @@ export function ProStudioRoutingControls({projectId,status,proposals}:{projectId
     finally{setBusy('');}
   }
   return <div className="admin-review pro-studio-routing">
-    <div><strong>Pro Studio Routing</strong><p>Publish a sanitized brief to verified Studio Partners, review private proposals, then route one. Partners cannot see competitors or client identity.</p></div>
+    <div><strong>Pro Studio Routing</strong><p>Share the project brief with verified Studio Partners, review each private proposal, and choose which one the client should receive. Partner responses and client identity remain private.</p></div>
     <div className="submit-row">
       {status!=='published'&&status!=='routed'&&<button className="mini-button approve" disabled={Boolean(busy)} type="button" onClick={()=>act('publish')}>Publish opportunity</button>}
       {status==='published'&&<button className="mini-button" disabled={Boolean(busy)} type="button" onClick={()=>act('close')}>Close opportunity</button>}
