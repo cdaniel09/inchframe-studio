@@ -34,14 +34,17 @@ export async function POST(request:Request){
 
   const creatorSlug=requestedSlug(request,body);
   const creator=creatorSlug?await getPublicCreatorBySlug(creatorSlug):null;
-  if(creatorSlug&&!creator)return Response.json({error:'That creator is no longer available. Choose another creator or use Match Me.'},{status:409});
-  const id=await createProject(user,{title,projectType,brief,audience,platforms,dueDate:dueDate||null,budgetRange,requestedCreator:creator});
+  if(creatorSlug&&!creator)return Response.json({error:'That Studio Partner is no longer available. Choose another partner or use a private Studio match.'},{status:409});
+  const routingMode=creator?'direct':clean(body.routingMode,30)||'match';
+  if(!['direct','match','pro_studio'].includes(routingMode))return Response.json({error:'Invalid routing option.'},{status:400});
+  const marketplaceRequested=routingMode==='pro_studio';
+  const id=await createProject(user,{title,projectType,brief,audience,platforms,dueDate:dueDate||null,budgetRange,requestedCreator:creator,marketplaceRequested});
 
   let emailSent=true;
   try{
     await sendInquiryReceivedEmails({
       email:user.email,displayName:user.displayName,projectId:id,title,projectType,
-      brief:creator?`Requested certified creator: ${creator.display_name}\n\n${brief}`:brief,
+      brief:creator?`Requested Studio Partner: ${creator.display_name}\n\n${brief}`:marketplaceRequested?`Requested Pro Studio review\n\n${brief}`:brief,
       audience,platforms,dueDate:dueDate||null,budgetRange
     });
   }catch(error){emailSent=false;console.error('Inquiry notification email failed',error);}

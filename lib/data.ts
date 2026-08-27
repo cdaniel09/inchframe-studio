@@ -11,7 +11,8 @@ export type StudioProject = {
   budget_range:string; accepted_at:string|null; declined_at:string|null; access_code_hash:string|null;
   access_code_expires_at:string|null; advanced_unlocked_at:string|null; advanced_brief:string; must_have:string;
   avoid_notes:string; reference_links:string; audio_notes:string; requested_creator:string; requested_creator_id:string|null;
-  assigned_creator_id:string|null; created_at:string; updated_at:string;
+  assigned_creator_id:string|null; marketplace_requested:number; marketplace_status:'none'|'pending'|'published'|'routed'|'closed';
+  marketplace_published_at:string|null; marketplace_expires_at:string|null; created_at:string; updated_at:string;
 };
 export type StudioAsset = {id:string;project_id:string;uploaded_by_id:string;uploaded_by_email:string;kind:string;object_key:string;filename:string;mime_type:string;byte_size:number;label:string;version:number;status:string;created_at:string};
 export type StudioComment = {id:string;project_id:string;asset_id:string|null;author_id:string;author_email:string;body:string;created_at:string};
@@ -24,7 +25,9 @@ export type QuoteOffer={id:string;quote_id:string;actor_id:string;actor_role:'cr
 export type ProjectQuoteBundle={quote:ProjectQuote;offers:QuoteOffer[];creator:CreatorProfile};
 export type ProjectAgreement={id:string;project_id:string;version:number;status:'draft'|'pending_client'|'changes_requested'|'active'|'completed';goal:string;scope:string;deliverables:string;out_of_scope:string;start_date:string|null;target_date:string|null;milestones:string;revision_rounds:number;communication_method:string;response_expectation:string;client_responsibilities:string;creator_responsibilities:string;final_delivery:string;change_policy:string;creator_accepted_at:string|null;client_accepted_at:string|null;completed_at:string|null;updated_by_id:string;created_at:string;updated_at:string};
 export type ProjectActivity={id:string;project_id:string;author_id:string;author_email:string;author_role:'creator'|'client'|'admin';kind:'message'|'progress'|'milestone'|'decision'|'blocker'|'delivery';title:string;body:string;next_step:string;needs_response_from:'none'|'creator'|'client'|'admin';target_date:string|null;resolved_at:string|null;resolved_by_id:string|null;created_at:string};
-export type AdminProjectOperation={project_id:string;title:string;project_type:string;project_status:string;owner_email:string;due_date:string|null;updated_at:string;creator_name:string|null;agreement_status:ProjectAgreement['status']|null;agreement_target_date:string|null;admin_actions:number;open_actions:number;blockers:number;pending_reviews:number;latest_activity_at:string|null;latest_activity_title:string|null;latest_activity_kind:ProjectActivity['kind']|null};
+export type AdminProjectOperation={project_id:string;title:string;project_type:string;project_status:string;marketplace_status:StudioProject['marketplace_status'];proposal_count:number;owner_email:string;due_date:string|null;updated_at:string;creator_name:string|null;agreement_status:ProjectAgreement['status']|null;agreement_target_date:string|null;admin_actions:number;open_actions:number;blockers:number;pending_reviews:number;latest_activity_at:string|null;latest_activity_title:string|null;latest_activity_kind:ProjectActivity['kind']|null};
+export type ProStudioProposal={id:string;project_id:string;creator_id:string;status:'submitted'|'withdrawn'|'routed'|'declined';amount_cents:number;note:string;timeline_days:number;included_revisions:number;created_at:string;updated_at:string;partner_name?:string;partner_slug?:string};
+export type ProStudioOpportunity={id:string;title:string;project_type:string;brief:string;audience:string;platforms:string;due_date:string|null;budget_range:string;marketplace_published_at:string|null;marketplace_expires_at:string|null;proposal:ProStudioProposal|null};
 
 const globalForStudio = globalThis as typeof globalThis & {inchframeStudioDb?: DatabaseSync; inchframeSchemaReady?: boolean};
 
@@ -159,6 +162,15 @@ export async function ensureSchema() {
       target_date TEXT, resolved_at TEXT, resolved_by_id TEXT, created_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS pro_studio_proposals (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, creator_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','withdrawn','routed','declined')),
+      amount_cents INTEGER NOT NULL, note TEXT NOT NULL, timeline_days INTEGER NOT NULL,
+      included_revisions INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(creator_id) REFERENCES creator_profiles(id) ON DELETE RESTRICT,
+      UNIQUE(project_id,creator_id)
+    );
   `);
 
   const userColumns=columns('users');
@@ -180,6 +192,10 @@ export async function ensureSchema() {
   addColumn('projects',projectColumns,'requested_creator',"TEXT NOT NULL DEFAULT ''");
   addColumn('projects',projectColumns,'requested_creator_id','TEXT');
   addColumn('projects',projectColumns,'assigned_creator_id','TEXT');
+  addColumn('projects',projectColumns,'marketplace_requested','INTEGER NOT NULL DEFAULT 0');
+  addColumn('projects',projectColumns,'marketplace_status',"TEXT NOT NULL DEFAULT 'none'");
+  addColumn('projects',projectColumns,'marketplace_published_at','TEXT');
+  addColumn('projects',projectColumns,'marketplace_expires_at','TEXT');
   if(addedUnlock) db.prepare('UPDATE projects SET advanced_unlocked_at=created_at WHERE advanced_unlocked_at IS NULL').run();
 
   const creatorColumns=columns('creator_profiles');
@@ -204,6 +220,9 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_project_agreements_status_target ON project_agreements(status, target_date);
     CREATE INDEX IF NOT EXISTS idx_project_activity_project_created ON project_activity(project_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_project_activity_actions ON project_activity(needs_response_from, resolved_at, target_date);
+    CREATE INDEX IF NOT EXISTS idx_projects_marketplace_status ON projects(marketplace_status, marketplace_published_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pro_studio_proposals_project_status ON pro_studio_proposals(project_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pro_studio_proposals_creator_status ON pro_studio_proposals(creator_id, status, updated_at DESC);
     PRAGMA optimize;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_profiles_invite_hash ON creator_profiles(creator_invite_hash) WHERE creator_invite_hash IS NOT NULL;
   `);
@@ -265,7 +284,7 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
   const db=database(),now=new Date().toISOString();
   const existing=db.prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
   if(!existing&&!input.avatarKey)throw new Error('A profile icon is required.');
-  if(!existing&&!input.creatorInviteHash)throw new Error('A Pro Creator invite key is required.');
+  if(!existing&&!input.creatorInviteHash)throw new Error('A Studio Partner invite key is required.');
   const id=existing?.id||crypto.randomUUID();
   let slug=existing?.slug||creatorSlug(input.displayName);
   if(!existing){const collision=db.prepare('SELECT 1 FROM creator_profiles WHERE slug=? COLLATE NOCASE').get(slug);if(collision)slug=`${slug.slice(0,45)}-${id.slice(0,8)}`;}
@@ -370,13 +389,13 @@ export async function verifyStudioAccount(tokenHash:string) {
   return {...account,email_verified_at:now,verification_token_hash:null,verification_expires_at:null};
 }
 
-export async function createProject(user:ChatGPTUser,input:{title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string;requestedCreator?:CreatorProfile|null}) {
+export async function createProject(user:ChatGPTUser,input:{title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string;requestedCreator?:CreatorProfile|null;marketplaceRequested?:boolean}) {
   await ensureSchema();
   const id=crypto.randomUUID(),now=new Date().toISOString(),db=database();
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,requested_creator,requested_creator_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'[]','',?,?,?,?,?)`)
-      .run(id,user.userId,user.email,input.title,input.projectType,input.requestedCreator?'creator_requested':'inquiry_received',input.brief,input.audience,input.platforms,input.dueDate,input.budgetRange,input.requestedCreator?.display_name||'',input.requestedCreator?.id||null,now,now);
+    db.prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,requested_creator,requested_creator_id,marketplace_requested,marketplace_status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'[]','',?,?,?,?,?,?,?)`)
+      .run(id,user.userId,user.email,input.title,input.projectType,input.requestedCreator?'creator_requested':input.marketplaceRequested?'pro_studio_requested':'inquiry_received',input.brief,input.audience,input.platforms,input.dueDate,input.budgetRange,input.requestedCreator?.display_name||'',input.requestedCreator?.id||null,input.marketplaceRequested?1:0,input.marketplaceRequested?'pending':'none',now,now);
     if(input.requestedCreator) db.prepare(`INSERT INTO project_quotes (id,project_id,creator_id,status,created_at,updated_at) VALUES (?,?,?,'awaiting_creator',?,?)`).run(crypto.randomUUID(),id,input.requestedCreator.id,now,now);
     db.exec('COMMIT');
   } catch(error){db.exec('ROLLBACK');throw error;}
@@ -452,7 +471,7 @@ export async function saveProjectAgreement(projectId:string,user:ChatGPTUser,inp
   else database().prepare(`INSERT INTO project_agreements (id,project_id,version,status,goal,scope,deliverables,out_of_scope,start_date,target_date,milestones,revision_rounds,communication_method,response_expectation,client_responsibilities,creator_responsibilities,final_delivery,change_policy,creator_accepted_at,updated_by_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(crypto.randomUUID(),projectId,version,status,...values.slice(0,14),submit?now:null,values[14],now,now);
   if(submit){
     database().prepare(`UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE project_id=? AND needs_response_from='creator' AND resolved_at IS NULL AND title LIKE 'Changes requested on agreement%'`).run(now,user.userId,projectId);
-    addActivityRow(projectId,user,'creator',{kind:'decision',title:`Production agreement v${version} ready`,body:'The creator submitted the scope, schedule, responsibilities, review rounds, and final-delivery terms for client approval.',needsResponseFrom:'client',targetDate:input.targetDate});
+    addActivityRow(projectId,user,'creator',{kind:'decision',title:`Production agreement v${version} ready`,body:'The Studio Partner submitted the scope, schedule, responsibilities, review rounds, and final-delivery terms for client approval.',needsResponseFrom:'client',targetDate:input.targetDate});
   }
   else database().prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now,projectId);
   return status;
@@ -492,11 +511,12 @@ export async function resolveProjectActivity(projectId:string,activityId:string,
 
 export async function listAdminProjectOperations(user:ChatGPTUser):Promise<AdminProjectOperation[]>{
   await ensureSchema();if(!isStudioAdmin(user))return [];
-  return database().prepare(`SELECT p.id project_id,p.title,p.project_type,p.status project_status,p.owner_email,p.due_date,p.updated_at,cp.display_name creator_name,pa.status agreement_status,pa.target_date agreement_target_date,
+  return database().prepare(`SELECT p.id project_id,p.title,p.project_type,p.status project_status,p.marketplace_status,p.owner_email,p.due_date,p.updated_at,cp.display_name creator_name,pa.status agreement_status,pa.target_date agreement_target_date,
     (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.needs_response_from='admin' AND x.resolved_at IS NULL) admin_actions,
     (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.needs_response_from!='none' AND x.resolved_at IS NULL) open_actions,
     (SELECT COUNT(*) FROM project_activity x WHERE x.project_id=p.id AND x.kind='blocker' AND x.resolved_at IS NULL) blockers,
     (SELECT COUNT(*) FROM assets a WHERE a.project_id=p.id AND a.status='in_review') pending_reviews,
+    (SELECT COUNT(*) FROM pro_studio_proposals ps WHERE ps.project_id=p.id AND ps.status='submitted') proposal_count,
     (SELECT MAX(x.created_at) FROM project_activity x WHERE x.project_id=p.id) latest_activity_at,
     (SELECT x.title FROM project_activity x WHERE x.project_id=p.id ORDER BY x.created_at DESC LIMIT 1) latest_activity_title,
     (SELECT x.kind FROM project_activity x WHERE x.project_id=p.id ORDER BY x.created_at DESC LIMIT 1) latest_activity_kind
@@ -519,6 +539,111 @@ export async function getProjectQuoteBundle(projectId:string):Promise<ProjectQuo
   return {quote:{...quote},offers,creator:withCreatorSamples(creatorRow)};
 }
 
+function verifiedStudioPartnerForUser(userId:string){
+  return database().prepare(`SELECT * FROM creator_profiles WHERE user_id=? AND status='approved' AND pro_verified=1 AND identity_verified=1 AND tax_verified=1`).get(userId) as Omit<CreatorProfile,'samples'>|undefined;
+}
+
+export async function getStudioPartnerEligibility(user:ChatGPTUser){
+  await ensureSchema();
+  const profile=database().prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
+  return {eligible:Boolean(profile&&profile.status==='approved'&&profile.pro_verified&&profile.identity_verified&&profile.tax_verified),profile:profile?withCreatorSamples(profile):null};
+}
+
+export async function listProStudioOpportunities(user:ChatGPTUser):Promise<ProStudioOpportunity[]>{
+  await ensureSchema();
+  const partner=verifiedStudioPartnerForUser(user.userId);
+  if(!partner)return [];
+  const now=new Date().toISOString();
+  const rows=database().prepare(`SELECT p.id,p.title,p.project_type,p.brief,p.audience,p.platforms,p.due_date,p.budget_range,p.marketplace_published_at,p.marketplace_expires_at,
+    ps.id proposal_id,ps.creator_id proposal_creator_id,ps.status proposal_status,ps.amount_cents proposal_amount_cents,ps.note proposal_note,
+    ps.timeline_days proposal_timeline_days,ps.included_revisions proposal_included_revisions,ps.created_at proposal_created_at,ps.updated_at proposal_updated_at
+    FROM projects p LEFT JOIN pro_studio_proposals ps ON ps.project_id=p.id AND ps.creator_id=?
+    WHERE p.marketplace_status='published' AND (p.marketplace_expires_at IS NULL OR p.marketplace_expires_at>?)
+    ORDER BY p.marketplace_published_at DESC`).all(partner.id,now) as unknown as Record<string,unknown>[];
+  return rows.map(row=>({
+    id:String(row.id),title:String(row.title),project_type:String(row.project_type),brief:String(row.brief),
+    audience:String(row.audience),platforms:String(row.platforms),due_date:row.due_date?String(row.due_date):null,
+    budget_range:String(row.budget_range),marketplace_published_at:row.marketplace_published_at?String(row.marketplace_published_at):null,
+    marketplace_expires_at:row.marketplace_expires_at?String(row.marketplace_expires_at):null,
+    proposal:row.proposal_id?{id:String(row.proposal_id),project_id:String(row.id),creator_id:String(row.proposal_creator_id),
+      status:row.proposal_status as ProStudioProposal['status'],amount_cents:Number(row.proposal_amount_cents),note:String(row.proposal_note),
+      timeline_days:Number(row.proposal_timeline_days),included_revisions:Number(row.proposal_included_revisions),
+      created_at:String(row.proposal_created_at),updated_at:String(row.proposal_updated_at)}:null
+  }));
+}
+
+export async function listProStudioProposals(projectId:string,user:ChatGPTUser):Promise<ProStudioProposal[]>{
+  await ensureSchema();
+  if(!isStudioAdmin(user))return [];
+  const rows=database().prepare(`SELECT ps.*,cp.display_name partner_name,cp.slug partner_slug FROM pro_studio_proposals ps
+    JOIN creator_profiles cp ON cp.id=ps.creator_id WHERE ps.project_id=? ORDER BY ps.updated_at DESC`).all(projectId) as unknown as ProStudioProposal[];
+  return rows.map(row=>({...row}));
+}
+
+export async function setProStudioPublishing(projectId:string,user:ChatGPTUser,action:'publish'|'close'){
+  await ensureSchema();
+  if(!isStudioAdmin(user))throw new Error('Admin access required.');
+  const db=database(),now=new Date().toISOString();
+  const project=db.prepare('SELECT marketplace_status FROM projects WHERE id=?').get(projectId) as {marketplace_status:string}|undefined;
+  if(!project)throw new Error('Project not found.');
+  const accepted=db.prepare(`SELECT 1 FROM project_quotes WHERE project_id=? AND status='accepted'`).get(projectId);
+  if(accepted)throw new Error('A funded or accepted project cannot be published.');
+  if(action==='publish'){
+    const expiresAt=new Date(Date.now()+14*24*60*60*1000).toISOString();
+    db.prepare(`UPDATE projects SET marketplace_requested=1,marketplace_status='published',marketplace_published_at=?,marketplace_expires_at=?,status='pro_studio_published',updated_at=? WHERE id=?`).run(now,expiresAt,now,projectId);
+  }else{
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      db.prepare(`UPDATE projects SET marketplace_status='closed',marketplace_expires_at=?,status=CASE WHEN status='pro_studio_published' THEN 'inquiry_received' ELSE status END,updated_at=? WHERE id=?`).run(now,now,projectId);
+      db.prepare(`UPDATE pro_studio_proposals SET status='declined',updated_at=? WHERE project_id=? AND status='submitted'`).run(now,projectId);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
+}
+
+export async function saveProStudioProposal(projectId:string,user:ChatGPTUser,input:{action:'submit'|'withdraw';amountCents:number;note:string;timelineDays:number;includedRevisions:number}){
+  await ensureSchema();
+  const db=database(),partner=verifiedStudioPartnerForUser(user.userId);
+  if(!partner)throw new Error('Only verified Studio Partners can respond to Pro Studio opportunities.');
+  const project=db.prepare(`SELECT marketplace_status,marketplace_expires_at FROM projects WHERE id=?`).get(projectId) as {marketplace_status:string;marketplace_expires_at:string|null}|undefined;
+  if(!project||project.marketplace_status!=='published'||(project.marketplace_expires_at&&project.marketplace_expires_at<=new Date().toISOString()))throw new Error('This opportunity is no longer open.');
+  const now=new Date().toISOString(),existing=db.prepare('SELECT id FROM pro_studio_proposals WHERE project_id=? AND creator_id=?').get(projectId,partner.id) as {id:string}|undefined;
+  if(input.action==='withdraw'){
+    if(!existing)throw new Error('No proposal is available to withdraw.');
+    db.prepare(`UPDATE pro_studio_proposals SET status='withdrawn',updated_at=? WHERE id=?`).run(now,existing.id);
+    return;
+  }
+  const minimum=Math.max(studioMinimumCents(),partner.rate_min*100);
+  if(!Number.isInteger(input.amountCents)||input.amountCents<minimum)throw new Error(`The minimum customer price is $${(minimum/100).toLocaleString('en-US')}.`);
+  if(!input.note.trim())throw new Error('Explain your approach and what is included.');
+  if(!Number.isInteger(input.timelineDays)||input.timelineDays<1||input.timelineDays>365)throw new Error('Timeline must be between 1 and 365 days.');
+  if(!Number.isInteger(input.includedRevisions)||input.includedRevisions<0||input.includedRevisions>20)throw new Error('Included revisions must be between 0 and 20.');
+  if(existing)db.prepare(`UPDATE pro_studio_proposals SET status='submitted',amount_cents=?,note=?,timeline_days=?,included_revisions=?,updated_at=? WHERE id=?`).run(input.amountCents,input.note.trim(),input.timelineDays,input.includedRevisions,now,existing.id);
+  else db.prepare(`INSERT INTO pro_studio_proposals (id,project_id,creator_id,status,amount_cents,note,timeline_days,included_revisions,created_at,updated_at) VALUES (?,?,?,'submitted',?,?,?,?,?,?)`).run(crypto.randomUUID(),projectId,partner.id,input.amountCents,input.note.trim(),input.timelineDays,input.includedRevisions,now,now);
+}
+
+export async function routeProStudioProposal(projectId:string,proposalId:string,user:ChatGPTUser){
+  await ensureSchema();
+  if(!isStudioAdmin(user))throw new Error('Admin access required.');
+  const db=database(),now=new Date().toISOString();
+  const row=db.prepare(`SELECT ps.*,cp.display_name,cp.user_id FROM pro_studio_proposals ps JOIN creator_profiles cp ON cp.id=ps.creator_id
+    WHERE ps.id=? AND ps.project_id=? AND ps.status='submitted' AND cp.status='approved' AND cp.pro_verified=1 AND cp.identity_verified=1 AND cp.tax_verified=1`).get(proposalId,projectId) as (ProStudioProposal&{display_name:string;user_id:string})|undefined;
+  if(!row)throw new Error('Choose an active proposal from a verified Studio Partner.');
+  const quoteId=crypto.randomUUID(),expiresAt=new Date(Date.now()+7*24*60*60*1000).toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const existing=db.prepare('SELECT id,status FROM project_quotes WHERE project_id=?').get(projectId) as {id:string;status:string}|undefined;
+    if(existing?.status==='accepted')throw new Error('The accepted Studio Partner cannot be replaced.');
+    if(existing){db.prepare('DELETE FROM quote_offers WHERE quote_id=?').run(existing.id);db.prepare(`UPDATE project_quotes SET creator_id=?,status='awaiting_customer',amount_cents=?,deposit_cents=?,counter_count=0,expires_at=?,latest_actor='creator',latest_note=?,updated_at=? WHERE id=?`).run(row.creator_id,row.amount_cents,projectDepositCents(row.amount_cents),expiresAt,row.note,now,existing.id);}
+    else db.prepare(`INSERT INTO project_quotes (id,project_id,creator_id,status,amount_cents,deposit_cents,expires_at,latest_actor,latest_note,created_at,updated_at) VALUES (?,?,?,'awaiting_customer',?,?,?,'creator',?,?,?)`).run(quoteId,projectId,row.creator_id,row.amount_cents,projectDepositCents(row.amount_cents),expiresAt,row.note,now,now);
+    const activeQuote=(existing?.id||quoteId);
+    db.prepare(`INSERT INTO quote_offers (id,quote_id,actor_id,actor_role,amount_cents,note,created_at) VALUES (?,?,?,'creator',?,?,?)`).run(crypto.randomUUID(),activeQuote,row.user_id,row.amount_cents,row.note,now);
+    db.prepare(`UPDATE pro_studio_proposals SET status=CASE WHEN id=? THEN 'routed' ELSE 'declined' END,updated_at=? WHERE project_id=? AND status='submitted'`).run(proposalId,now,projectId);
+    db.prepare(`UPDATE projects SET requested_creator=?,requested_creator_id=?,marketplace_status='routed',marketplace_expires_at=?,status='quote_ready',updated_at=? WHERE id=?`).run(row.display_name,row.creator_id,now,now,projectId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
 export async function assignCreatorToProject(projectId:string,creatorId:string){
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
@@ -530,7 +655,9 @@ export async function assignCreatorToProject(projectId:string,creatorId:string){
     if(existing&&existing.status==='accepted')throw new Error('The accepted creator assignment cannot be replaced.');
     if(existing){db.prepare(`UPDATE project_quotes SET creator_id=?,status='awaiting_creator',amount_cents=0,deposit_cents=0,counter_count=0,expires_at=NULL,latest_actor='',latest_note='',updated_at=? WHERE id=?`).run(creatorId,now,existing.id);db.prepare('DELETE FROM quote_offers WHERE quote_id=?').run(existing.id);}
     else db.prepare(`INSERT INTO project_quotes (id,project_id,creator_id,status,created_at,updated_at) VALUES (?,?,?,'awaiting_creator',?,?)`).run(crypto.randomUUID(),projectId,creatorId,now,now);
-    db.prepare(`UPDATE projects SET requested_creator=?,requested_creator_id=?,status='creator_requested',updated_at=? WHERE id=?`).run(creator.display_name,creatorId,now,projectId);
+    db.prepare(`UPDATE pro_studio_proposals SET status='declined',updated_at=? WHERE project_id=? AND status='submitted'`).run(now,projectId);
+    db.prepare(`UPDATE projects SET requested_creator=?,requested_creator_id=?,marketplace_status=CASE WHEN marketplace_status='published' THEN 'routed' ELSE marketplace_status END,marketplace_expires_at=CASE WHEN marketplace_status='published' THEN ? ELSE marketplace_expires_at END,status='creator_requested',updated_at=? WHERE id=?`)
+      .run(creator.display_name,creatorId,now,now,projectId);
     db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
 }
@@ -539,7 +666,7 @@ export async function submitCreatorQuote(projectId:string,user:ChatGPTUser,input
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
   const row=db.prepare(`SELECT q.*,p.due_date,cp.user_id,cp.rate_min FROM project_quotes q JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`).get(projectId) as (ProjectQuote&{due_date:string|null;user_id:string;rate_min:number})|undefined;
-  if(!row||row.user_id!==user.userId)throw new Error('This quote request is not assigned to your creator profile.');
+  if(!row||row.user_id!==user.userId)throw new Error('This quote request is not assigned to your Studio Partner profile.');
   if(row.status!=='awaiting_creator')throw new Error('This quote is not waiting for a creator offer.');
   const minimum=Math.max(studioMinimumCents(),row.rate_min*100);
   if(!Number.isInteger(input.amountCents)||input.amountCents<minimum)throw new Error(`The minimum customer price is $${(minimum/100).toLocaleString('en-US')}.`);
@@ -588,7 +715,7 @@ export async function acceptProjectQuote(projectId:string,user:ChatGPTUser){
   const row=db.prepare(`SELECT q.*,p.owner_id FROM project_quotes q JOIN projects p ON p.id=q.project_id WHERE q.project_id=?`).get(projectId) as (ProjectQuote&{owner_id:string})|undefined;
   if(!row||row.owner_id!==user.userId)throw new Error('Only the project owner can accept this quote.');
   if(row.status!=='awaiting_customer')throw new Error('This quote is not available to accept.');
-  if(row.expires_at&&row.expires_at<=now)throw new Error('This quote has expired. Ask the creator for a fresh quote.');
+  if(row.expires_at&&row.expires_at<=now)throw new Error('This quote has expired. Ask the Studio Partner for a fresh quote.');
   db.exec('BEGIN IMMEDIATE');
   try{
     db.prepare(`UPDATE project_quotes SET status='accepted',latest_actor='client',updated_at=? WHERE id=?`).run(now,row.id);

@@ -64,7 +64,7 @@ export function QuoteControls({projectId,bundle,viewer,platformMinimum,feeBps}:{
       <div className="review-actions"><button className="mini-button approve" disabled={Boolean(busy)} type="submit">{busy==='offer'?'Sending…':'Send quote →'}</button><button className="mini-button warn" disabled={Boolean(busy)} type="button" onClick={()=>act('decline')}>Decline request</button></div>
     </form>}
 
-    {quote.status==='awaiting_creator'&&viewer!=='creator'&&<div className="stage-message"><strong>{quote.latest_actor==='client'?'Counteroffer sent.':'Waiting for creator quote.'}</strong><p>{quote.latest_actor==='client'?'The creator can accept the amount by returning it as the next formal quote, revise it, or decline.':'The selected creator has private access to the essential brief.'}</p></div>}
+    {quote.status==='awaiting_creator'&&viewer!=='creator'&&<div className="stage-message"><strong>{quote.latest_actor==='client'?'Counteroffer sent.':'Waiting for Studio Partner quote.'}</strong><p>{quote.latest_actor==='client'?'The Studio Partner can accept the amount by returning it as the next formal quote, revise it, or decline.':'The selected Studio Partner has private access to the essential brief.'}</p></div>}
 
     {quote.status==='awaiting_customer'&&viewer==='client'&&<div className="quote-decision">
       <div className="stage-message good"><strong>Quote ready.</strong><p>{quote.latest_note||'Review the total, deposit, and creator before continuing.'} The quote expires {quote.expires_at?new Date(quote.expires_at).toLocaleDateString():'in seven days'}.</p></div>
@@ -77,9 +77,9 @@ export function QuoteControls({projectId,bundle,viewer,platformMinimum,feeBps}:{
     {quote.status==='admin_review'&&viewer!=='admin'&&<div className="stage-message"><strong>Brief exception check.</strong><p>The Studio is checking timing or transaction guardrails before releasing the quote. No admin price-setting is involved.</p></div>}
 
     {quote.status==='accepted'&&!quote.deposit_paid_at&&viewer==='client'&&<div className="stage-message good"><strong>Quote accepted. Lock the assignment.</strong><p>Pay {money(quote.deposit_cents)} now. The advanced media workspace opens automatically after Stripe confirms payment.</p><button className="button button-green" disabled={Boolean(busy)} onClick={checkout}>{busy==='checkout'?'Opening Stripe…':`Pay ${money(quote.deposit_cents)} securely →`}</button></div>}
-    {quote.status==='accepted'&&!quote.deposit_paid_at&&viewer!=='client'&&<div className="stage-message good"><strong>Assignment accepted.</strong><p>The creator is reserved while the customer completes the required payment.</p></div>}
+    {quote.status==='accepted'&&!quote.deposit_paid_at&&viewer!=='client'&&<div className="stage-message good"><strong>Assignment accepted.</strong><p>The Studio Partner is reserved while the customer completes the required payment.</p></div>}
     {quote.status==='accepted'&&quote.deposit_paid_at&&<div className="stage-message good"><strong>Assignment funded.</strong><p>The advanced project workspace is open and production communication remains inside Studio.</p></div>}
-    {quote.status==='declined'&&<div className="stage-message warn"><strong>Quote closed.</strong><p>The current creator assignment is no longer active. Inchframe can route the brief to another certified creator.</p></div>}
+    {quote.status==='declined'&&<div className="stage-message warn"><strong>Quote closed.</strong><p>The current creator assignment is no longer active. Inchframe can route the brief to another Studio Partner.</p></div>}
 
     {bundle.offers.length>0&&<details className="offer-history"><summary>Offer history · {bundle.offers.length}</summary>{bundle.offers.map(offer=><div key={offer.id}><span>{roleLabel(offer.actor_role)}</span><strong>{money(offer.amount_cents)}</strong><p>{offer.note}</p><small>{new Date(offer.created_at).toLocaleString()}</small></div>)}</details>}
     {message&&<p className="control-message" role="status">{message}</p>}

@@ -21,7 +21,7 @@ export function CreatorApplicationForm({profile}:{profile:CreatorProfile|null}) 
       <label><span>Rate from (USD)</span><input name="rateMin" type="number" min="1" max="1000000" required defaultValue={profile?.rate_min||''}/></label>
       <label><span>Rate to (USD)</span><input name="rateMax" type="number" min="1" max="1000000" required defaultValue={profile?.rate_max||''}/></label>
       <label className="wide"><span>Inchframe account email</span><input name="inchframeEmail" type="email" required readOnly={Boolean(profile)} maxLength={254} defaultValue={profile?.inchframe_email||''}/><small>Used privately to verify your active Paid Pro subscription. It is never shown publicly.{profile?' Contact the Studio if this account changes.':''}</small></label>
-      {!profile&&<label className="wide"><span>Pro Creator invite key</span><textarea name="creatorInviteKey" required maxLength={4096} rows={3} placeholder="ifc1.…"/><small>Generate this signed key from your paid Inchframe Pro account, then paste it here. It is accepted once and is never displayed publicly.</small></label>}
+      {!profile&&<label className="wide"><span>Studio Partner invite key</span><textarea name="creatorInviteKey" required maxLength={4096} rows={3} placeholder="ifc1.…"/><small>Generate this signed key from your paid Inchframe Pro account, then paste it here. It is accepted once and is never displayed publicly.</small></label>}
     </div>
     <div className="form-section section-gap"><span className="form-step">02</span><div><h2>Icon + work links</h2><p>Upload one profile icon. Link to work hosted elsewhere—do not upload sample media.</p></div></div>
     <div className="form-grid">
@@ -30,7 +30,7 @@ export function CreatorApplicationForm({profile}:{profile:CreatorProfile|null}) 
     </div>
     <div className="creator-terms">
       <label className="rights-check"><input name="proConfirmed" type="checkbox" value="yes" required defaultChecked={profile?.pro_confirmed===1}/><span>I have an active paid Inchframe Pro subscription. I understand the Studio will verify it before certification.</span></label>
-      <label className="rights-check"><input name="contractorConfirmed" type="checkbox" value="yes" required/><span>I understand certified creators work as independent production subcontractors on Inchframe-led projects, not as employees.</span></label>
+      <label className="rights-check"><input name="contractorConfirmed" type="checkbox" value="yes" required/><span>I understand Studio Partners work as independent production subcontractors on Inchframe-led projects, not as employees.</span></label>
       <label className="rights-check"><input name="contactConfirmed" type="checkbox" value="yes" required/><span>I will keep client contact, scoping, and project communication inside Inchframe. Inchframe handles creator introductions.</span></label>
     </div>
       <label className="rights-check"><input name="verificationConfirmed" type="checkbox" value="yes" required/><span>Before accepting paid work, I will complete identity, tax-form, and payout verification through Inchframe’s approved provider. I remain responsible for my own taxes and business obligations.</span></label>

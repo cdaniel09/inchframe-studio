@@ -3,7 +3,7 @@ import { useEffect,useRef,useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 const DRAFT_KEY='inchframe-studio-inquiry-draft';
-type Draft={title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string;budgetRange:string};
+type Draft={title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string;budgetRange:string;routingMode:string};
 
 export function IntakeForm({creatorSlug=''}:{creatorSlug?:string}){
   const router=useRouter();
@@ -17,6 +17,11 @@ export function IntakeForm({creatorSlug=''}:{creatorSlug?:string}){
       if(!raw||!formRef.current)return;
       const draft=JSON.parse(raw) as Partial<Draft>;
       for(const[key,value]of Object.entries(draft)){
+        if(key==='routingMode'&&typeof value==='string'){
+          const radio=formRef.current.querySelector<HTMLInputElement>(`input[name="routingMode"][value="${CSS.escape(value)}"]`);
+          if(radio)radio.checked=true;
+          continue;
+        }
         const control=formRef.current.elements.namedItem(key);
         if((control instanceof HTMLInputElement||control instanceof HTMLTextAreaElement||control instanceof HTMLSelectElement)&&typeof value==='string')control.value=value;
       }
@@ -30,7 +35,8 @@ export function IntakeForm({creatorSlug=''}:{creatorSlug?:string}){
       title:String(form.get('title')||''),projectType:String(form.get('projectType')||''),
       brief:String(form.get('brief')||''),audience:String(form.get('audience')||''),
       platforms:String(form.get('platforms')||''),dueDate:String(form.get('dueDate')||''),
-      budgetRange:String(form.get('budgetRange')||'')
+      budgetRange:String(form.get('budgetRange')||''),
+      routingMode:creatorSlug?'direct':String(form.get('routingMode')||'match')
     };
     sessionStorage.setItem(DRAFT_KEY,JSON.stringify(draft));
     try{
@@ -57,10 +63,14 @@ export function IntakeForm({creatorSlug=''}:{creatorSlug?:string}){
       <label><span>Where will it run?</span><input name="platforms" maxLength={300} placeholder="YouTube, Instagram, landing page…"/></label>
       <label><span>Ideal delivery date</span><input name="dueDate" type="date"/></label>
       <label><span>Working budget</span><select name="budgetRange" required defaultValue=""><option value="" disabled>Select a range</option><option value="under_500">Under $500</option><option value="500_1000">$500–$1,000</option><option value="1000_2500">$1,000–$2,500</option><option value="2500_5000">$2,500–$5,000</option><option value="5000_plus">$5,000+</option></select></label>
+      {!creatorSlug&&<fieldset className="wide routing-choice"><legend>How should Inchframe route this inquiry?</legend>
+        <label><input name="routingMode" type="radio" value="match" defaultChecked/><span><strong>Private Studio match</strong><small>Inchframe selects one Studio Partner and requests a private quote.</small></span></label>
+        <label><input name="routingMode" type="radio" value="pro_studio"/><span><strong>Request Pro Studio</strong><small>After admin review, approved Studio Partners may send private proposals for Inchframe to route.</small></span></label>
+      </fieldset>}
       <label className="bot-field" aria-hidden="true"><span>Company website</span><input name="companyWebsite" tabIndex={-1} autoComplete="off"/></label>
     </div>
     {error&&<p className="form-error" role="alert">{error}</p>}
-    <div className="inquiry-note"><strong>No uploads yet.</strong><p>{creatorSlug?'Your selected creator will review this brief and send a private quote.':'Inchframe will route a fit project to one certified creator—never an open bidding pool.'}</p></div>
-    <div className="submit-row"><p>Creator contact and negotiation stay private inside Studio.</p><button className="button button-green" disabled={busy} type="submit">{busy?'Sending inquiry…':'Submit inquiry →'}</button></div>
+    <div className="inquiry-note"><strong>No uploads yet.</strong><p>{creatorSlug?'Your selected Studio Partner will review this brief and send a private quote.':'Inchframe reviews every inquiry before routing it privately.'}</p></div>
+    <div className="submit-row"><p>Partner contact and negotiation stay private inside Studio.</p><button className="button button-green" disabled={busy} type="submit">{busy?'Sending inquiry…':'Submit inquiry →'}</button></div>
   </form>;
 }
