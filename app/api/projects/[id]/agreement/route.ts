@@ -26,7 +26,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     if(body.action==='accept'||body.action==='changes'){
       const status=await reviewProjectAgreement(id,user,body.action,text(body.note,2000));
       await notify(before.quote?.creator.owner_email,{subject:`Agreement ${status==='active'?'accepted':'changes requested'}: ${before.project.title}`,heading:status==='active'?'The production agreement is active.':'The client requested agreement changes.',message:status==='active'?'The agreed scope and timeline are now locked. Use the project log for progress, decisions, and blockers.':text(body.note,2000),projectId:id});
-      return Response.json({message:status==='active'?'Agreement accepted and activated.':'Change request sent to the creator.'});
+      return Response.json({message:status==='active'?'Agreement accepted and activated.':'Change request sent to the Studio Partner.'});
     }
     return Response.json({error:'Invalid agreement action.'},{status:400});
   }catch(error){return Response.json({error:error instanceof Error?error.message:'Could not update the agreement.'},{status:400});}

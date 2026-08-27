@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { ProjectQuote,QuoteOffer } from '@/lib/data';
 
 function money(cents:number){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(cents/100);}
-function roleLabel(value:string){return value==='creator'?'Creator':'Customer';}
+function roleLabel(value:string){return value==='creator'?'Studio Partner':'Customer';}
 
 type QuoteView={quote:ProjectQuote;offers:QuoteOffer[];creator:{id:string;display_name:string;headline:string;rate_min:number}};
 export function QuoteControls({projectId,bundle,viewer,platformMinimum,feeBps}:{projectId:string;bundle:QuoteView;viewer:'client'|'creator'|'admin';platformMinimum:number;feeBps:number}){
@@ -48,17 +48,17 @@ export function QuoteControls({projectId,bundle,viewer,platformMinimum,feeBps}:{
   return <div className="quote-workflow">
     <div className="quote-creator">
       <img src={`/api/creator-icons/${bundle.creator.id}`} alt=""/>
-      <div><span className="card-code">PRIVATE CREATOR QUOTE</span><strong>{bundle.creator.display_name}</strong><p>{bundle.creator.headline}</p></div>
+      <div><span className="card-code">PRIVATE STUDIO PARTNER QUOTE</span><strong>{bundle.creator.display_name}</strong><p>{bundle.creator.headline}</p></div>
     </div>
 
     {amount>0&&<div className="quote-numbers">
       <div><span>Customer price</span><strong>{money(amount)}</strong></div>
       <div><span>Required now</span><strong>{money(quote.deposit_cents)}</strong></div>
-      {(viewer==='creator'||viewer==='admin')&&<><div><span>Inchframe · {feeBps/100}%</span><strong>− {money(inchframe)}</strong></div><div><span>Estimated creator payout</span><strong>{money(creatorEstimate)}</strong><small>Before Connect/payout fees; actual Stripe fees control.</small></div></>}
+      {(viewer==='creator'||viewer==='admin')&&<><div><span>Inchframe · {feeBps/100}%</span><strong>− {money(inchframe)}</strong></div><div><span>Estimated partner payout</span><strong>{money(creatorEstimate)}</strong><small>Before Connect/payout fees; actual Stripe fees control.</small></div></>}
     </div>}
 
     {quote.status==='awaiting_creator'&&viewer==='creator'&&<form className="quote-form" onSubmit={event=>submitOffer(event,'offer')}>
-      <div><strong>{quote.latest_actor==='client'?'Respond to the counteroffer':'Send the customer-facing quote'}</strong><p>Minimum {money(minimum)}. The displayed total includes Inchframe’s 20%; processing and payout fees are deducted from creator compensation.</p></div>
+      <div><strong>{quote.latest_actor==='client'?'Respond to the counteroffer':'Send the customer-facing quote'}</strong><p>Minimum {money(minimum)}. The displayed total includes Inchframe’s 20%; processing and payout fees are deducted from Studio Partner compensation.</p></div>
       <label><span>Total project price · USD</span><input name="amount" type="number" min={minimum/100} max="1000000" step="1" required defaultValue={amount?amount/100:minimum/100}/></label>
       <label><span>Scope note</span><textarea name="note" rows={4} maxLength={1000} required placeholder="Deliverables, turnaround, included revisions, and exclusions." defaultValue=""/></label>
       <div className="review-actions"><button className="mini-button approve" disabled={Boolean(busy)} type="submit">{busy==='offer'?'Sending…':'Send quote →'}</button><button className="mini-button warn" disabled={Boolean(busy)} type="button" onClick={()=>act('decline')}>Decline request</button></div>
@@ -67,7 +67,7 @@ export function QuoteControls({projectId,bundle,viewer,platformMinimum,feeBps}:{
     {quote.status==='awaiting_creator'&&viewer!=='creator'&&<div className="stage-message"><strong>{quote.latest_actor==='client'?'Counteroffer sent.':'Waiting for Studio Partner quote.'}</strong><p>{quote.latest_actor==='client'?'The Studio Partner can accept the amount by returning it as the next formal quote, revise it, or decline.':'The selected Studio Partner has private access to the essential brief.'}</p></div>}
 
     {quote.status==='awaiting_customer'&&viewer==='client'&&<div className="quote-decision">
-      <div className="stage-message good"><strong>Quote ready.</strong><p>{quote.latest_note||'Review the total, deposit, and creator before continuing.'} The quote expires {quote.expires_at?new Date(quote.expires_at).toLocaleDateString():'in seven days'}.</p></div>
+      <div className="stage-message good"><strong>Quote ready.</strong><p>{quote.latest_note||'Review the total, deposit, and Studio Partner before continuing.'} The quote expires {quote.expires_at?new Date(quote.expires_at).toLocaleDateString():'in seven days'}.</p></div>
       <div className="review-actions"><button className="mini-button approve" disabled={Boolean(busy)} onClick={()=>act('accept')}>{busy==='accept'?'Accepting…':'Accept quote'}</button><button className="mini-button warn" disabled={Boolean(busy)} onClick={()=>act('decline')}>Decline</button></div>
       {quote.counter_count<2&&<details className="counter-panel"><summary>Make a counteroffer</summary><form className="quote-form" onSubmit={event=>submitOffer(event,'counter')}><label><span>Counter total · minimum {money(minimum)}</span><input name="amount" type="number" min={minimum/100} max="1000000" step="1" required defaultValue={amount/100}/></label><label><span>What should change?</span><textarea name="note" rows={3} maxLength={1000} required/></label><button className="mini-button" disabled={Boolean(busy)} type="submit">{busy==='counter'?'Sending…':`Send counter · ${2-quote.counter_count} left`}</button></form></details>}
     </div>}

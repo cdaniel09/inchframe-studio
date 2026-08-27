@@ -26,9 +26,9 @@ export default async function StartPage({searchParams}:{searchParams:Promise<{cr
     <section className="form-shell"><div className="shell narrow">
       {creator?<div className="creator-policy selected-creator">
         <img src={`/api/creator-icons/${creator.id}`} alt=""/>
-        <div><span className="card-code">REQUESTING THROUGH INCHFRAME</span><strong>{creator.display_name}</strong><p>The Studio Partner will review this brief and quote inside Studio. Contact and production stay inside Inchframe.</p><Link href={`/creators/${creator.slug}`}>Review Studio Partner profile ↗</Link></div>
+        <div><span className="card-code">REQUESTING THROUGH INCHFRAME</span><strong>{creator.display_name}</strong><p>The Studio Partner will review this brief and quote inside Studio. Contact and production stay inside Inchframe.</p><Link href={`/studio-partners/${creator.slug}`}>Review Studio Partner profile ↗</Link></div>
       </div>:<div className="creator-policy selected-creator match-request">
-        <div><span className="card-code">YOUR PRODUCTION PATH</span><strong>Choose how you want to begin.</strong><p>Request a private match or invite Studio Partners through Pro Studio. Inchframe reviews the brief before anyone else sees it.</p><Link href="/creators">Or choose from the Studio Partner Directory →</Link></div>
+        <div><span className="card-code">YOUR PRODUCTION PATH</span><strong>Choose how you want to begin.</strong><p>Request a private match or invite Studio Partners through Pro Studio. Inchframe reviews the brief before anyone else sees it.</p><Link href="/studio-partners">Or choose from the Studio Partner Directory →</Link></div>
       </div>}
       <IntakeForm creatorSlug={creator?.slug}/>
     </div></section>

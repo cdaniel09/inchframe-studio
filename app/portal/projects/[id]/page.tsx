@@ -41,9 +41,9 @@ async function ProjectContent({params}:{params:Promise<{id:string}>}) {
   return <main className="portal-page">
     <PortalHeader user={user}/>
     <section className="project-banner"><div className="shell">
-      <a className="back-link" href={creatorViewer?'/portal/creators':'/portal'}>← {creatorViewer?'Partner desk':'All projects'}</a>
+      <a className="back-link" href={creatorViewer?'/portal/studio-partners':'/portal'}>← {creatorViewer?'Partner desk':'All projects'}</a>
       <div className="project-title-grid"><div><p className="eyebrow"><span>●</span> {titleCase(bundle.project.project_type)}</p><h1>{bundle.project.title}</h1><p>{bundle.project.brief}</p></div>
-      <div className="project-facts"><div><span>Status</span><strong>{titleCase(bundle.project.status)}</strong></div><div><span>Target date</span><strong>{shortDate(bundle.project.due_date)}</strong></div><div><span>Budget</span><strong>{titleCase(bundle.project.budget_range)||'To discuss'}</strong></div>{bundle.quote&&<div><span>Creator</span><strong>{bundle.quote.creator.display_name}</strong></div>}</div></div>
+      <div className="project-facts"><div><span>Status</span><strong>{titleCase(bundle.project.status)}</strong></div><div><span>Target date</span><strong>{shortDate(bundle.project.due_date)}</strong></div><div><span>Budget</span><strong>{titleCase(bundle.project.budget_range)||'To discuss'}</strong></div>{bundle.quote&&<div><span>Studio Partner</span><strong>{bundle.quote.creator.display_name}</strong></div>}</div></div>
     </div></section>
     <section className="project-content"><div className="shell project-layout">
       <aside><nav className="project-nav"><a href="#overview">Quote + assignment</a>{showProduction&&<><a href="#agreement">Work agreement</a><a href="#activity">Updates + messages <b>{bundle.activity.length}</b></a><a href="#advanced">Advanced brief</a><a href="#seeds">Seed library <b>{seeds.length}</b></a><a href="#audio">Audio <b>{audio.length}</b></a><a href="#review">Review queue <b>{reviews.length}</b></a><a href="#delivery">Final delivery <b>{deliveries.length}</b></a></>}</nav>

@@ -10,7 +10,7 @@ export async function POST(_request:Request,{params}:{params:Promise<{id:string}
   const bundle=await getProjectBundle(id,user);
   if(!bundle||bundle.project.owner_id!==user.userId)return Response.json({error:'Project not found.'},{status:404});
   const quote=bundle.quote?.quote;
-  if(!quote||quote.status!=='accepted')return Response.json({error:'Accept the creator quote before starting payment.'},{status:409});
+  if(!quote||quote.status!=='accepted')return Response.json({error:'Accept the Studio Partner quote before starting payment.'},{status:409});
   if(quote.deposit_paid_at)return Response.json({error:'This project payment is already complete.'},{status:409});
 
   try{

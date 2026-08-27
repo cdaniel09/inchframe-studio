@@ -457,7 +457,7 @@ export async function productionAgreementReady(projectId:string){
 }
 export async function saveProjectAgreement(projectId:string,user:ChatGPTUser,input:{goal:string;scope:string;deliverables:string;outOfScope:string;startDate:string|null;targetDate:string|null;milestones:string;revisionRounds:number;responseExpectation:string;clientResponsibilities:string;creatorResponsibilities:string;finalDelivery:string;changePolicy:string},submit:boolean){
   const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
-  if(roleForProject(project,user)!=='creator')throw new Error('Only the assigned creator can draft the production agreement.');
+  if(roleForProject(project,user)!=='creator')throw new Error('Only the assigned Studio Partner can draft the production agreement.');
   if(!project.advanced_unlocked_at)throw new Error('The project must be funded before the agreement is prepared.');
   const existing=database().prepare('SELECT * FROM project_agreements WHERE project_id=?').get(projectId) as ProjectAgreement|undefined;
   if(existing&&['pending_client','active','completed'].includes(existing.status))throw new Error(existing.status==='pending_client'?'The agreement is with the client. Wait for approval or a recorded change request.':'The accepted agreement is locked. Record a change request before changing scope.');
@@ -649,11 +649,11 @@ export async function assignCreatorToProject(projectId:string,creatorId:string){
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
   const creator=db.prepare(`SELECT id,display_name FROM creator_profiles WHERE id=? AND status='approved' AND pro_verified=1 AND identity_verified=1 AND tax_verified=1`).get(creatorId) as {id:string;display_name:string}|undefined;
-  if(!creator)throw new Error('Choose a fully verified, approved creator.');
+  if(!creator)throw new Error('Choose a fully verified, approved Studio Partner.');
   db.exec('BEGIN IMMEDIATE');
   try{
     const existing=db.prepare('SELECT id,status FROM project_quotes WHERE project_id=?').get(projectId) as {id:string;status:string}|undefined;
-    if(existing&&existing.status==='accepted')throw new Error('The accepted creator assignment cannot be replaced.');
+    if(existing&&existing.status==='accepted')throw new Error('The accepted Studio Partner assignment cannot be replaced.');
     if(existing){db.prepare(`UPDATE project_quotes SET creator_id=?,status='awaiting_creator',amount_cents=0,deposit_cents=0,counter_count=0,expires_at=NULL,latest_actor='',latest_note='',updated_at=? WHERE id=?`).run(creatorId,now,existing.id);db.prepare('DELETE FROM quote_offers WHERE quote_id=?').run(existing.id);}
     else db.prepare(`INSERT INTO project_quotes (id,project_id,creator_id,status,created_at,updated_at) VALUES (?,?,?,'awaiting_creator',?,?)`).run(crypto.randomUUID(),projectId,creatorId,now,now);
     db.prepare(`UPDATE pro_studio_proposals SET status='declined',updated_at=? WHERE project_id=? AND status='submitted'`).run(now,projectId);
@@ -668,7 +668,7 @@ export async function submitCreatorQuote(projectId:string,user:ChatGPTUser,input
   const db=database(),now=new Date().toISOString();
   const row=db.prepare(`SELECT q.*,p.due_date,cp.user_id,cp.rate_min FROM project_quotes q JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`).get(projectId) as (ProjectQuote&{due_date:string|null;user_id:string;rate_min:number})|undefined;
   if(!row||row.user_id!==user.userId)throw new Error('This quote request is not assigned to your Studio Partner profile.');
-  if(row.status!=='awaiting_creator')throw new Error('This quote is not waiting for a creator offer.');
+  if(row.status!=='awaiting_creator')throw new Error('This quote is not waiting for a Studio Partner offer.');
   const minimum=Math.max(studioMinimumCents(),row.rate_min*100);
   if(!Number.isInteger(input.amountCents)||input.amountCents<minimum)throw new Error(`The minimum customer price is $${(minimum/100).toLocaleString('en-US')}.`);
   const rush=Boolean(row.due_date&&new Date(`${row.due_date}T23:59:59Z`).getTime()-Date.now()<7*24*60*60*1000);

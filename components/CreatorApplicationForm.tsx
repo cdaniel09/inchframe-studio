@@ -6,12 +6,12 @@ import type { CreatorProfile } from '@/lib/data';
 export function CreatorApplicationForm({profile}:{profile:CreatorProfile|null}) {
   const router=useRouter();
   const[busy,setBusy]=useState(false),[error,setError]=useState('');
-  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');try{const response=await fetch('/api/creators',{method:'POST',body:new FormData(event.currentTarget),credentials:'include'});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||'Could not submit your creator application.');router.push('/portal/creators');router.refresh();}catch(reason){setError(reason instanceof Error?reason.message:'Could not submit your application.');setBusy(false);}}
+  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');try{const response=await fetch('/api/creators',{method:'POST',body:new FormData(event.currentTarget),credentials:'include'});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||'Could not submit your Studio Partner application.');router.push('/portal/studio-partners');router.refresh();}catch(reason){setError(reason instanceof Error?reason.message:'Could not submit your application.');setBusy(false);}}
   const samples=profile?.samples||[];
   return <form className="intake-form creator-application" onSubmit={submit}>
     <div className="form-section"><span className="form-step">01</span><div><h2>Production profile</h2><p>This becomes your public profile after Studio approval.</p></div></div>
     <div className="form-grid">
-      <label><span>Creator display name</span><input name="displayName" required maxLength={80} defaultValue={profile?.display_name||''}/></label>
+      <label><span>Studio Partner display name</span><input name="displayName" required maxLength={80} defaultValue={profile?.display_name||''}/></label>
       <label><span>Location / time zone</span><input name="location" required maxLength={100} placeholder="Los Angeles · Pacific" defaultValue={profile?.location||''}/></label>
       <label className="wide"><span>Profile headline</span><input name="headline" required maxLength={120} placeholder="AI filmmaker focused on music-led surrealism" defaultValue={profile?.headline||''}/></label>
       <label className="wide"><span>Short production bio</span><textarea name="bio" required maxLength={1200} rows={5} placeholder="Your strengths, production approach, and the kinds of briefs you handle best." defaultValue={profile?.bio||''}/></label>
@@ -31,7 +31,7 @@ export function CreatorApplicationForm({profile}:{profile:CreatorProfile|null}) 
     <div className="creator-terms">
       <label className="rights-check"><input name="proConfirmed" type="checkbox" value="yes" required defaultChecked={profile?.pro_confirmed===1}/><span>I have an active paid Inchframe Pro subscription. I understand the Studio will verify it before certification.</span></label>
       <label className="rights-check"><input name="contractorConfirmed" type="checkbox" value="yes" required/><span>I understand Studio Partners work as independent production subcontractors on Inchframe-led projects, not as employees.</span></label>
-      <label className="rights-check"><input name="contactConfirmed" type="checkbox" value="yes" required/><span>I will keep client contact, scoping, and project communication inside Inchframe. Inchframe handles creator introductions.</span></label>
+      <label className="rights-check"><input name="contactConfirmed" type="checkbox" value="yes" required/><span>I will keep client contact, scoping, and project communication inside Inchframe. Inchframe handles Studio Partner introductions.</span></label>
     </div>
       <label className="rights-check"><input name="verificationConfirmed" type="checkbox" value="yes" required/><span>Before accepting paid work, I will complete identity, tax-form, and payout verification through Inchframe’s approved provider. I remain responsible for my own taxes and business obligations.</span></label>
     {error&&<p className="form-error" role="alert">{error}</p>}

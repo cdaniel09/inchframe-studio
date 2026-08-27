@@ -6,7 +6,7 @@ import { SiteFooter } from '@/components/SiteFooter';
 import { getPublicCreatorBySlug,studioMinimumCents } from '@/lib/data';
 
 function money(value:number){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value);}
-export async function generateMetadata({params}:{params:Promise<{slug:string}>}):Promise<Metadata>{const{slug}=await params;const creator=await getPublicCreatorBySlug(slug);return creator?{title:creator.display_name,description:creator.headline}:{title:'Creator not found'};}
+export async function generateMetadata({params}:{params:Promise<{slug:string}>}):Promise<Metadata>{const{slug}=await params;const creator=await getPublicCreatorBySlug(slug);return creator?{title:creator.display_name,description:creator.headline}:{title:'Studio Partner not found'};}
 
 export default async function CreatorProfilePage({params}:{params:Promise<{slug:string}>}){
   const{slug}=await params;const creator=await getPublicCreatorBySlug(slug);if(!creator)notFound();

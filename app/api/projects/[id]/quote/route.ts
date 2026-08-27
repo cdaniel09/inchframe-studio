@@ -25,7 +25,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
   try{
     if(body.action==='offer'){
       const status=await submitCreatorQuote(id,user,{amountCents:amountCents(body.amount),note:note(body.note)});
-      if(status==='awaiting_customer')await notify({to:before.project.owner_email,subject:`Quote ready: ${before.project.title}`,heading:'Your creator quote is ready.',message:'Review the price and deposit, then accept or make a structured counteroffer inside Studio.',projectId:id});
+      if(status==='awaiting_customer')await notify({to:before.project.owner_email,subject:`Quote ready: ${before.project.title}`,heading:'Your Studio Partner quote is ready.',message:'Review the price and deposit, then accept or make a structured counteroffer inside Studio.',projectId:id});
       return Response.json({message:status==='admin_review'?'Quote sent for an automatic Studio exception check.':'Quote sent to the customer.'});
     }
     if(body.action==='counter'){
@@ -41,7 +41,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     if(body.action==='approve'){
       if(!isStudioAdmin(user))return Response.json({error:'Studio admin access required.'},{status:403});
       await approveProjectQuote(id);
-      await notify({to:before.project.owner_email,subject:`Quote ready: ${before.project.title}`,heading:'Your creator quote is ready.',message:'The Studio exception check is complete. Review the quote inside your project.',projectId:id});
+      await notify({to:before.project.owner_email,subject:`Quote ready: ${before.project.title}`,heading:'Your Studio Partner quote is ready.',message:'The Studio exception check is complete. Review the quote inside your project.',projectId:id});
       return Response.json({message:'Exception cleared and quote released to the customer.'});
     }
     if(body.action==='decline'){
