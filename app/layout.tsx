@@ -2,6 +2,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import './auth-styles.css';
+import './sso-styles.css';
+import './user-admin-styles.css';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://studio.inchframe.com';
 

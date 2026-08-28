@@ -17,7 +17,29 @@ export type StudioProject = {
 export type StudioAsset = {id:string;project_id:string;uploaded_by_id:string;uploaded_by_email:string;kind:string;object_key:string;filename:string;mime_type:string;byte_size:number;label:string;version:number;status:string;created_at:string};
 export type StudioComment = {id:string;project_id:string;asset_id:string|null;author_id:string;author_email:string;body:string;created_at:string};
 export type StudioDecision = {id:string;project_id:string;asset_id:string;author_id:string;author_email:string;decision:'approved'|'changes_requested';note:string;created_at:string};
-export type StudioAccount = {id:string;email:string;display_name:string;password_hash:string;role:'client';email_verified_at:string|null;verification_token_hash:string|null;verification_expires_at:string|null;created_at:string};
+export type StudioAccount = {
+  id:string;email:string;display_name:string;password_hash:string;role:'client';
+  email_verified_at:string|null;verification_token_hash:string|null;verification_expires_at:string|null;created_at:string;
+  account_user_id:string|null;auth_source:'local'|'account';studio_access_status:'active'|'suspended';
+  account_tier:'creator'|'pro'|null;subscription_status:string;studio_partner_eligible:number;
+  studio_partner_invite_id:string|null;studio_partner_invite_expires_at:string|null;studio_admin_claim:number;last_login_at:string|null;
+};
+export type StudioAdminUser = {
+  id:string;email:string;display_name:string;email_verified_at:string|null;created_at:string;account_user_id:string|null;
+  auth_source:'local'|'account';studio_access_status:'active'|'suspended';account_tier:'creator'|'pro'|null;
+  subscription_status:string;studio_partner_eligible:number;studio_partner_invite_id:string|null;
+  studio_partner_invite_expires_at:string|null;studio_admin_claim:number;last_login_at:string|null;active_sessions:number;
+  project_count:number;partner_status:CreatorProfile['status']|null;partner_profile_id:string|null;
+  pro_verified:number;identity_verified:number;tax_verified:number;
+};
+export type AccountSsoIdentity = {
+  id:string;email:string;emailVerified:boolean;displayName:string;roles:string[];
+  tier:'creator'|'pro'|null;subscriptionStatus:string;studioPartnerEligible:boolean;
+  studioPartnerInviteId:string|null;studioPartnerInviteExpiresAt:string|null;
+};
+export type StudioSsoTransaction = {
+  state_hash:string;code_verifier:string;return_to:string;intent:'customer'|'studio_partner';expires_at:string;
+};
 export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
 export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
 export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
@@ -109,6 +131,10 @@ export async function ensureSchema() {
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL, display_name TEXT NOT NULL,
       full_name TEXT, role TEXT NOT NULL CHECK(role IN ('admin','client')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS sso_login_transactions (
+      state_hash TEXT PRIMARY KEY, code_verifier TEXT NOT NULL, return_to TEXT NOT NULL,
+      intent TEXT NOT NULL CHECK(intent IN ('customer','studio_partner')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS schema_migrations (
       key TEXT PRIMARY KEY, applied_at TEXT NOT NULL
     );
@@ -177,6 +203,16 @@ export async function ensureSchema() {
   addColumn('users',userColumns,'email_verified_at','TEXT');
   addColumn('users',userColumns,'verification_token_hash','TEXT');
   addColumn('users',userColumns,'verification_expires_at','TEXT');
+  addColumn('users',userColumns,'account_user_id','TEXT');
+  addColumn('users',userColumns,'auth_source',"TEXT NOT NULL DEFAULT 'local'");
+  addColumn('users',userColumns,'studio_access_status',"TEXT NOT NULL DEFAULT 'active'");
+  addColumn('users',userColumns,'account_tier','TEXT');
+  addColumn('users',userColumns,'subscription_status',"TEXT NOT NULL DEFAULT 'none'");
+  addColumn('users',userColumns,'studio_partner_eligible','INTEGER NOT NULL DEFAULT 0');
+  addColumn('users',userColumns,'studio_partner_invite_id','TEXT');
+  addColumn('users',userColumns,'studio_partner_invite_expires_at','TEXT');
+  addColumn('users',userColumns,'studio_admin_claim','INTEGER NOT NULL DEFAULT 0');
+  addColumn('users',userColumns,'last_login_at','TEXT');
 
   const projectColumns=columns('projects');
   addColumn('projects',projectColumns,'accepted_at','TEXT');
@@ -206,11 +242,14 @@ export async function ensureSchema() {
 
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token_hash) WHERE verification_token_hash IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_account_user_id ON users(account_user_id) WHERE account_user_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_users_access_created ON users(studio_access_status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_projects_owner_updated ON projects(owner_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_assets_project_created ON assets(project_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comments_project_asset ON comments(project_id, asset_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_decisions_asset_created ON decisions(asset_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_sso_login_transactions_expires ON sso_login_transactions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_creator_profiles_status_updated ON creator_profiles(status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_creator_samples_creator_sort ON creator_samples(creator_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_projects_requested_creator ON projects(requested_creator_id, updated_at DESC);
@@ -264,12 +303,114 @@ export async function findStudioSession(tokenHash:string):Promise<ChatGPTUser|nu
   const now=new Date().toISOString();
   const row=database().prepare('SELECT user_id,email,display_name,full_name,role FROM sessions WHERE token_hash=? AND expires_at>?').get(tokenHash,now) as {user_id:string;email:string;display_name:string;full_name:string|null;role:'admin'|'client'}|undefined;
   if(!row) return null;
+  const account=database().prepare('SELECT studio_access_status FROM users WHERE id=?').get(row.user_id) as {studio_access_status:string}|undefined;
+  if(account?.studio_access_status==='suspended') {
+    database().prepare('DELETE FROM sessions WHERE user_id=?').run(row.user_id);
+    return null;
+  }
   return {userId:row.user_id,email:row.email,displayName:row.display_name,fullName:row.full_name,role:row.role};
 }
 
 export async function deleteStudioSession(tokenHash:string) {
   await ensureSchema();
   database().prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash);
+}
+
+export async function createStudioSsoTransaction(input:{stateHash:string;codeVerifier:string;returnTo:string;intent:'customer'|'studio_partner';expiresAt:string}) {
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  db.prepare('DELETE FROM sso_login_transactions WHERE expires_at<=?').run(now);
+  db.prepare('INSERT INTO sso_login_transactions (state_hash,code_verifier,return_to,intent,expires_at,created_at) VALUES (?,?,?,?,?,?)')
+    .run(input.stateHash,input.codeVerifier,input.returnTo,input.intent,input.expiresAt,now);
+}
+
+export async function consumeStudioSsoTransaction(stateHash:string):Promise<StudioSsoTransaction|null> {
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row=db.prepare('SELECT state_hash,code_verifier,return_to,intent,expires_at FROM sso_login_transactions WHERE state_hash=? AND expires_at>?')
+      .get(stateHash,now) as StudioSsoTransaction|undefined;
+    db.prepare('DELETE FROM sso_login_transactions WHERE state_hash=? OR expires_at<=?').run(stateHash,now);
+    db.exec('COMMIT');
+    return row??null;
+  } catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function upsertAccountSsoUser(identity:AccountSsoIdentity):Promise<ChatGPTUser> {
+  await ensureSchema();
+  if(!identity.emailVerified)throw new Error('Account email verification is required.');
+  const email=identity.email.trim().toLowerCase(),displayName=identity.displayName.trim()||email.split('@')[0];
+  const db=database(),now=new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let account=db.prepare('SELECT * FROM users WHERE account_user_id=?').get(identity.id) as StudioAccount|undefined;
+    if(!account)account=db.prepare('SELECT * FROM users WHERE email=? COLLATE NOCASE').get(email) as StudioAccount|undefined;
+    if(account) {
+      if(account.studio_access_status==='suspended')throw new Error('Studio access is suspended. Contact Inchframe support.');
+      db.prepare(`UPDATE users SET account_user_id=?,email=?,display_name=?,email_verified_at=COALESCE(email_verified_at,?),
+        auth_source='account',account_tier=?,subscription_status=?,studio_partner_eligible=?,
+        studio_partner_invite_id=?,studio_partner_invite_expires_at=?,studio_admin_claim=?,last_login_at=? WHERE id=?`)
+        .run(identity.id,email,displayName,now,identity.tier,identity.subscriptionStatus,identity.studioPartnerEligible?1:0,
+          identity.studioPartnerInviteId,identity.studioPartnerInviteExpiresAt,identity.roles.includes('studio_admin')?1:0,now,account.id);
+    } else {
+      const id=crypto.randomUUID();
+      db.prepare(`INSERT INTO users (id,email,display_name,password_hash,role,email_verified_at,verification_token_hash,
+        verification_expires_at,created_at,account_user_id,auth_source,studio_access_status,account_tier,
+        subscription_status,studio_partner_eligible,studio_partner_invite_id,studio_partner_invite_expires_at,studio_admin_claim,last_login_at)
+        VALUES (?,?,?,'','client',?,NULL,NULL,?,?,'account','active',?,?,?,?,?,?,?)`)
+        .run(id,email,displayName,now,now,identity.id,identity.tier,identity.subscriptionStatus,
+          identity.studioPartnerEligible?1:0,identity.studioPartnerInviteId,identity.studioPartnerInviteExpiresAt,
+          identity.roles.includes('studio_admin')?1:0,now);
+      account=db.prepare('SELECT * FROM users WHERE id=?').get(id) as StudioAccount;
+    }
+    const current=db.prepare('SELECT * FROM users WHERE account_user_id=?').get(identity.id) as StudioAccount;
+    db.exec('COMMIT');
+    const admin=identity.roles.includes('studio_admin')||isStudioAdmin(email);
+    return {userId:current.id,email,displayName,fullName:displayName,role:admin?'admin':'client'};
+  } catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function getAccountSsoEligibility(user:ChatGPTUser) {
+  await ensureSchema();
+  const row=database().prepare(`SELECT auth_source,account_tier,subscription_status,studio_partner_eligible,
+    studio_partner_invite_id,studio_partner_invite_expires_at FROM users WHERE id=?`).get(user.userId) as Pick<StudioAccount,
+    'auth_source'|'account_tier'|'subscription_status'|'studio_partner_eligible'|'studio_partner_invite_id'|'studio_partner_invite_expires_at'>|undefined;
+  return row??null;
+}
+
+export async function listStudioAdminUsers(user:ChatGPTUser):Promise<StudioAdminUser[]> {
+  await ensureSchema();if(!isStudioAdmin(user))return [];
+  const now=new Date().toISOString();
+  return database().prepare(`SELECT u.id,u.email,u.display_name,u.email_verified_at,u.created_at,u.account_user_id,u.auth_source,
+    u.studio_access_status,u.account_tier,u.subscription_status,u.studio_partner_eligible,u.studio_partner_invite_id,
+    u.studio_partner_invite_expires_at,u.studio_admin_claim,u.last_login_at,
+    (SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.id AND s.expires_at>?) active_sessions,
+    (SELECT COUNT(*) FROM projects p WHERE p.owner_id=u.id) project_count,
+    cp.status partner_status,cp.id partner_profile_id,COALESCE(cp.pro_verified,0) pro_verified,
+    COALESCE(cp.identity_verified,0) identity_verified,COALESCE(cp.tax_verified,0) tax_verified
+    FROM users u LEFT JOIN creator_profiles cp ON cp.user_id=u.id
+    ORDER BY COALESCE(u.last_login_at,u.created_at) DESC`).all(now) as unknown as StudioAdminUser[];
+}
+
+export async function getStudioAccountById(id:string) {
+  await ensureSchema();
+  return (database().prepare('SELECT * FROM users WHERE id=?').get(id) as StudioAccount|undefined)??null;
+}
+
+export async function setStudioUserAccess(id:string,status:'active'|'suspended') {
+  await ensureSchema();
+  const db=database();
+  const result=db.prepare('UPDATE users SET studio_access_status=? WHERE id=?').run(status,id);
+  if(!result.changes)throw new Error('Studio user not found.');
+  if(status==='suspended')db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+}
+
+export async function revokeStudioUserSessions(id:string) {
+  await ensureSchema();
+  const account=database().prepare('SELECT id FROM users WHERE id=?').get(id);
+  if(!account)throw new Error('Studio user not found.');
+  database().prepare('DELETE FROM sessions WHERE user_id=?').run(id);
 }
 
 function withCreatorSamples(profile:Omit<CreatorProfile,'samples'>&{creator_invite_hash?:string}):CreatorProfile {
@@ -293,7 +434,7 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
   db.exec('BEGIN IMMEDIATE');
   try {
     if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(user.email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,now,id);
-    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,creator_invite_hash,pro_confirmed,status,avatar_object_key,avatar_mime_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,input.creatorInviteHash||'',avatarKey,avatarMime,now,now);
+    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,creator_invite_hash,pro_confirmed,status,avatar_object_key,avatar_mime_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,input.creatorInviteHash||null,avatarKey,avatarMime,now,now);
     db.prepare('DELETE FROM creator_samples WHERE creator_id=?').run(id);
     const insert=db.prepare('INSERT INTO creator_samples (id,creator_id,title,url,sort_order) VALUES (?,?,?,?,?)');
     input.samples.slice(0,5).forEach((sample,index)=>insert.run(crypto.randomUUID(),id,sample.title,sample.url,index));

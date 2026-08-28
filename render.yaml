@@ -19,6 +19,16 @@ services:
         value: /var/data/uploads
       - key: AUTH_SECRET
         generateValue: true
+      - key: ACCOUNT_SSO_BASE_URL
+        value: https://account.inchframe.com
+      - key: STUDIO_AUTH_MODE
+        value: hybrid
+      - key: STUDIO_SSO_CLIENT_ID
+        value: studio
+      - key: STUDIO_SSO_CLIENT_SECRET
+        sync: false
+      - key: STUDIO_SSO_REDIRECT_URI
+        value: https://studio.inchframe.com/api/auth/account/callback
       - key: ADMIN_EMAIL
         value: info@inchframe.com
       - key: VERIFIED_EMAIL_ALLOWLIST

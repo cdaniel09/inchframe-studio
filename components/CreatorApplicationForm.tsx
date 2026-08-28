@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CreatorProfile } from '@/lib/data';
 
-export function CreatorApplicationForm({profile}:{profile:CreatorProfile|null}) {
+export function CreatorApplicationForm({profile,accountEmail,ssoEligible}:{profile:CreatorProfile|null;accountEmail:string|null;ssoEligible:boolean}) {
   const router=useRouter();
   const[busy,setBusy]=useState(false),[error,setError]=useState('');
   async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');try{const response=await fetch('/api/creators',{method:'POST',body:new FormData(event.currentTarget),credentials:'include'});const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||'Could not submit your Studio Partner application.');router.push('/portal/studio-partners');router.refresh();}catch(reason){setError(reason instanceof Error?reason.message:'Could not submit your application.');setBusy(false);}}
@@ -20,8 +20,8 @@ export function CreatorApplicationForm({profile}:{profile:CreatorProfile|null}) 
       <label><span>Rate basis</span><select name="rateUnit" required defaultValue={profile?.rate_unit||'project'}><option value="project">Per project</option><option value="day">Day rate</option><option value="hour">Hourly</option></select></label>
       <label><span>Rate from (USD)</span><input name="rateMin" type="number" min="1" max="1000000" required defaultValue={profile?.rate_min||''}/></label>
       <label><span>Rate to (USD)</span><input name="rateMax" type="number" min="1" max="1000000" required defaultValue={profile?.rate_max||''}/></label>
-      <label className="wide"><span>Inchframe account email</span><input name="inchframeEmail" type="email" required readOnly={Boolean(profile)} maxLength={254} defaultValue={profile?.inchframe_email||''}/><small>Used privately to verify your active Paid Pro subscription. It is never shown publicly.{profile?' Contact the Studio if this account changes.':''}</small></label>
-      {!profile&&<label className="wide"><span>Studio Partner invite key</span><textarea name="creatorInviteKey" required maxLength={4096} rows={3} placeholder="ifc1.…"/><small>Generate this signed key from your paid Inchframe Pro account, then paste it here. It is accepted once and is never displayed publicly.</small></label>}
+      <label className="wide"><span>Inchframe account email</span><input name="inchframeEmail" type="email" required readOnly={Boolean(profile)||Boolean(accountEmail)} maxLength={254} defaultValue={profile?.inchframe_email||accountEmail||''}/><small>Used privately to verify your active Paid Pro subscription. It is never shown publicly.{profile?' Contact the Studio if this account changes.':''}</small></label>
+      {!profile&&!ssoEligible&&<label className="wide"><span>Studio Partner invite key</span><textarea name="creatorInviteKey" required maxLength={4096} rows={3} placeholder="ifc1.…"/><small>Temporary migration fallback: generate this signed key from your paid Inchframe Pro account, then paste it here.</small></label>}
     </div>
     <div className="form-section section-gap"><span className="form-step">02</span><div><h2>Icon + work links</h2><p>Upload one profile icon. Link to work hosted elsewhere—do not upload sample media.</p></div></div>
     <div className="form-grid">
