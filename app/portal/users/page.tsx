@@ -6,7 +6,7 @@ import {PortalHeader} from '@/components/PortalHeader';
 import {isStudioAdmin,listStudioAdminUsers} from '@/lib/data';
 
 export const dynamic='force-dynamic';
-export const metadata={title:'Studio users'};
+export const metadata={title:'Studio partners'};
 function shortDate(value:string|null){return value?new Date(value).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'Never';}
 function label(value:string|null|undefined){return value?value.replaceAll('_',' ').replace(/\b\w/g,character=>character.toUpperCase()):'None';}
 
@@ -23,18 +23,18 @@ export default async function StudioUsersPage(){
   return <main className="portal-page"><PortalHeader user={admin}/>
     <section className="portal-head"><div className="shell portal-title-row"><div>
       <p className="eyebrow"><span>●</span> Studio admin only</p>
-      <h1>Studio users</h1>
+      <h1>Studio partners</h1>
       <p>Account identity links, Studio access, Partner eligibility, projects, verification, and active sessions.</p>
     </div><Link className="button button-outline" href="/portal/operations">Production operations</Link></div></section>
     <section className="portal-content"><div className="shell">
       <div className="operations-stats">
-        <div><span>Users</span><strong>{users.length}</strong></div>
+        <div><span>Accounts</span><strong>{users.length}</strong></div>
         <div><span>Active</span><strong>{totals.active}</strong></div>
         <div><span>Account linked</span><strong>{totals.linked}</strong></div>
         <div><span>Partner records</span><strong>{totals.partners}</strong></div>
         <div><span>Active sessions</span><strong>{totals.sessions}</strong></div>
       </div>
-      {users.length===0?<div className="empty-state"><span>00</span><h2>No Studio users yet.</h2></div>:
+      {users.length===0?<div className="empty-state"><span>00</span><h2>No Studio accounts yet.</h2></div>:
         <div className="studio-user-list">{users.map(user=>{
           const protectedAccount=user.id===admin.userId||user.studio_admin_claim===1||isStudioAdmin(user.email);
           return <article className={`portal-card studio-user-row ${user.studio_access_status==='suspended'?'suspended':''}`} key={user.id}>
