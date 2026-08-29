@@ -76,7 +76,7 @@ try{
   let result=await request('/login');
   assert(result.response.status===200&&result.text.includes('SIGN IN TO STUDIO')&&result.text.indexOf('SIGN IN TO STUDIO')<result.text.indexOf('INCHFRAME ACCOUNT')&&result.text.includes('Create a client account')&&!result.text.includes('Your session changed during the Studio deployment'),'Studio email/password is the default sign-in without deployment-specific session copy.');
   result=await request('/');
-  assert(result.response.status===200&&result.text.includes('href="/register"')&&result.text.includes('href="/studio-partners"'),'Public project and Studio Partner calls to action use their required entry pages.');
+  assert(result.response.status===200&&result.text.includes('href="/register"')&&result.text.includes('href="/studio-partners"')&&result.text.includes('inchframe-watermark-bug.png'),'Public project and Studio Partner calls to action use their required entry pages and the supplied logo appears in the header.');
   result=await request('/studio-partners');
   assert(result.response.status===200&&result.text.includes('REQUIREMENTS TO APPLY')&&result.text.includes('Independent-contractor eligibility')&&result.text.includes('Client contact kept inside Studio')&&result.text.includes('https://account.inchframe.com/account'),'Studio Partner page states requirements and directs applicants to Account.');
   assert(result.text.includes('/api/auth/account/start?returnTo=%2Fportal%2Fstudio-partners&amp;intent=studio_partner'),'The first Partner action returns an existing Account session to the Partner dashboard.');
