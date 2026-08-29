@@ -21,6 +21,7 @@ export type StudioAccount = {
   id:string;email:string;display_name:string;password_hash:string;role:'client';
   email_verified_at:string|null;verification_token_hash:string|null;verification_expires_at:string|null;created_at:string;
   account_user_id:string|null;auth_source:'local'|'account';studio_access_status:'active'|'suspended';
+  sessions_revoked_at:string|null;
   account_tier:'creator'|'pro'|null;subscription_status:string;studio_partner_eligible:number;
   studio_partner_invite_id:string|null;studio_partner_invite_expires_at:string|null;studio_admin_claim:number;last_login_at:string|null;
 };
@@ -206,6 +207,7 @@ export async function ensureSchema() {
   addColumn('users',userColumns,'account_user_id','TEXT');
   addColumn('users',userColumns,'auth_source',"TEXT NOT NULL DEFAULT 'local'");
   addColumn('users',userColumns,'studio_access_status',"TEXT NOT NULL DEFAULT 'active'");
+  addColumn('users',userColumns,'sessions_revoked_at','TEXT');
   addColumn('users',userColumns,'account_tier','TEXT');
   addColumn('users',userColumns,'subscription_status',"TEXT NOT NULL DEFAULT 'none'");
   addColumn('users',userColumns,'studio_partner_eligible','INTEGER NOT NULL DEFAULT 0');
@@ -311,6 +313,18 @@ export async function findStudioSession(tokenHash:string):Promise<ChatGPTUser|nu
   return {userId:row.user_id,email:row.email,displayName:row.display_name,fullName:row.full_name,role:row.role};
 }
 
+export async function validateStudioSessionUser(user:ChatGPTUser,issuedAt:number):Promise<ChatGPTUser|null> {
+  await ensureSchema();
+  if(user.userId.startsWith('admin:'))return user.role==='admin'&&isStudioAdmin(user.email)?user:null;
+  const row=database().prepare(`SELECT id,email,display_name,studio_access_status,sessions_revoked_at,studio_admin_claim
+    FROM users WHERE id=?`).get(user.userId) as {id:string;email:string;display_name:string;studio_access_status:string;sessions_revoked_at:string|null;studio_admin_claim:number}|undefined;
+  if(!row||row.studio_access_status!=='active')return null;
+  if(row.sessions_revoked_at&&new Date(row.sessions_revoked_at).getTime()>=issuedAt)return null;
+  const admin=row.studio_admin_claim===1||isStudioAdmin(row.email);
+  if(user.role==='admin'&&!admin)return null;
+  return {userId:row.id,email:row.email,displayName:row.display_name,fullName:row.display_name,role:admin?'admin':'client'};
+}
+
 export async function deleteStudioSession(tokenHash:string) {
   await ensureSchema();
   database().prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash);
@@ -403,14 +417,19 @@ export async function setStudioUserAccess(id:string,status:'active'|'suspended')
   const db=database();
   const result=db.prepare('UPDATE users SET studio_access_status=? WHERE id=?').run(status,id);
   if(!result.changes)throw new Error('Studio user not found.');
-  if(status==='suspended')db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+  if(status==='suspended'){
+    db.prepare('UPDATE users SET sessions_revoked_at=? WHERE id=?').run(new Date().toISOString(),id);
+    db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+  }
 }
 
 export async function revokeStudioUserSessions(id:string) {
   await ensureSchema();
   const account=database().prepare('SELECT id FROM users WHERE id=?').get(id);
   if(!account)throw new Error('Studio user not found.');
-  database().prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+  const db=database();
+  db.prepare('UPDATE users SET sessions_revoked_at=? WHERE id=?').run(new Date().toISOString(),id);
+  db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
 }
 
 function withCreatorSamples(profile:Omit<CreatorProfile,'samples'>&{creator_invite_hash?:string}):CreatorProfile {
