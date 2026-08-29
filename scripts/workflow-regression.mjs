@@ -74,7 +74,12 @@ child.stdout.on('data',chunk=>output=(output+chunk.toString()).slice(-30000));ch
 try{
   await waitForStudio(child,()=>output);
   let result=await request('/login');
-  assert(result.response.status===200&&result.text.includes('SIGN IN TO STUDIO')&&result.text.indexOf('SIGN IN TO STUDIO')<result.text.indexOf('INCHFRAME ACCOUNT')&&result.text.includes('Create a client account'),'Studio email/password is the default sign-in and Account remains secondary.');
+  assert(result.response.status===200&&result.text.includes('SIGN IN TO STUDIO')&&result.text.indexOf('SIGN IN TO STUDIO')<result.text.indexOf('INCHFRAME ACCOUNT')&&result.text.includes('Create a client account')&&!result.text.includes('Your session changed during the Studio deployment'),'Studio email/password is the default sign-in without deployment-specific session copy.');
+  result=await request('/');
+  assert(result.response.status===200&&result.text.includes('href="/register"')&&result.text.includes('href="/studio-partners"'),'Public project and Studio Partner calls to action use their required entry pages.');
+  result=await request('/studio-partners');
+  assert(result.response.status===200&&result.text.includes('REQUIREMENTS TO APPLY')&&result.text.includes('Independent-contractor eligibility')&&result.text.includes('Client contact kept inside Studio')&&result.text.includes('https://account.inchframe.com/account'),'Studio Partner page states requirements and directs applicants to Account.');
+  assert(result.text.includes('/api/auth/account/start?returnTo=%2Fportal%2Fstudio-partners&amp;intent=studio_partner'),'The first Partner action returns an existing Account session to the Partner dashboard.');
   result=await request('/register');
   assert(result.response.status===200&&result.text.includes('CREATE CLIENT ACCESS')&&result.text.includes('Create account'),'Native Studio client signup is available.');
   const invalidSignup=new FormData();invalidSignup.set('displayName','Test Client');invalidSignup.set('email','client@example.com');invalidSignup.set('password','short');
@@ -146,6 +151,7 @@ try{
   console.log('PASS Approved internal profile has an unambiguous active admin state.');
   console.log('PASS cdaniel09@gmail.com can manage the shared Support profile while retaining admin review.');
   console.log('PASS Studio client signup is restored and email/password is the default sign-in.');
+  console.log('PASS Public project and Studio Partner entry points use the requested destinations.');
 }catch(error){console.error(error instanceof Error?error.stack:error);console.error('\nStudio output:\n'+output);process.exitCode=1;}
 finally{
   child.kill();await new Promise(resolve=>{if(child.exitCode!==null)resolve();else{child.once('exit',resolve);setTimeout(resolve,2000);}});
