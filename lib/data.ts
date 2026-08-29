@@ -13,6 +13,7 @@ export type StudioProject = {
   avoid_notes:string; reference_links:string; audio_notes:string; requested_creator:string; requested_creator_id:string|null;
   assigned_creator_id:string|null; marketplace_requested:number; marketplace_status:'none'|'pending'|'published'|'routed'|'closed';
   marketplace_published_at:string|null; marketplace_expires_at:string|null; created_at:string; updated_at:string;
+  pending_changes:string;pending_changes_at:string|null;
 };
 export type StudioAsset = {id:string;project_id:string;uploaded_by_id:string;uploaded_by_email:string;kind:string;object_key:string;filename:string;mime_type:string;byte_size:number;label:string;version:number;status:string;created_at:string};
 export type StudioComment = {id:string;project_id:string;asset_id:string|null;author_id:string;author_email:string;body:string;created_at:string};
@@ -42,7 +43,8 @@ export type StudioSsoTransaction = {
   state_hash:string;code_verifier:string;return_to:string;intent:'customer'|'studio_partner';expires_at:string;
 };
 export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
-export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
+export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;pending_change_fields:string;pending_change_at:string|null;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
+export type ProjectEssentials={title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string};
 export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
 export type QuoteOffer={id:string;quote_id:string;actor_id:string;actor_role:'creator'|'client';amount_cents:number;note:string;created_at:string};
 export type ProjectQuoteBundle={quote:ProjectQuote;offers:QuoteOffer[];creator:CreatorProfile};
@@ -234,6 +236,8 @@ export async function ensureSchema() {
   addColumn('projects',projectColumns,'marketplace_status',"TEXT NOT NULL DEFAULT 'none'");
   addColumn('projects',projectColumns,'marketplace_published_at','TEXT');
   addColumn('projects',projectColumns,'marketplace_expires_at','TEXT');
+  addColumn('projects',projectColumns,'pending_changes',"TEXT NOT NULL DEFAULT ''");
+  addColumn('projects',projectColumns,'pending_changes_at','TEXT');
   if(addedUnlock) db.prepare('UPDATE projects SET advanced_unlocked_at=created_at WHERE advanced_unlocked_at IS NULL').run();
 
   const creatorColumns=columns('creator_profiles');
@@ -241,6 +245,8 @@ export async function ensureSchema() {
   addColumn('creator_profiles',creatorColumns,'pro_verified','INTEGER NOT NULL DEFAULT 0');
   addColumn('creator_profiles',creatorColumns,'identity_verified','INTEGER NOT NULL DEFAULT 0');
   addColumn('creator_profiles',creatorColumns,'tax_verified','INTEGER NOT NULL DEFAULT 0');
+  addColumn('creator_profiles',creatorColumns,'pending_change_fields',"TEXT NOT NULL DEFAULT '[]'");
+  addColumn('creator_profiles',creatorColumns,'pending_change_at','TEXT');
 
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token_hash) WHERE verification_token_hash IS NOT NULL;
@@ -281,6 +287,36 @@ export async function ensureSchema() {
       db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(verificationMigration,now);
       db.exec('COMMIT');
     } catch(error) {db.exec('ROLLBACK');throw error;}
+  }
+
+  const workflowFixtures='studio-workflow-fixtures-v1';
+  if(!db.prepare('SELECT 1 FROM schema_migrations WHERE key=?').get(workflowFixtures)){
+    const now=new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      const ensureFixtureUser=(email:string,displayName:string,pro:boolean)=>{
+        let user=db.prepare('SELECT id FROM users WHERE email=? COLLATE NOCASE').get(email) as {id:string}|undefined;
+        if(!user){
+          const id=pro?'test-partner-support':'test-client-chris';
+          db.prepare(`INSERT INTO users (id,email,display_name,password_hash,role,email_verified_at,created_at,auth_source,studio_access_status,account_tier,subscription_status,studio_partner_eligible)
+            VALUES (?,?,?,'','client',?,?,'account','active',?,?,?)`).run(id,email,displayName,now,now,pro?'pro':'creator',pro?'active':'none',pro?1:0);
+          user={id};
+        }
+        return user.id;
+      };
+      const chrisId=ensureFixtureUser('chris@inchframe.com','Chris',false);
+      const supportId=ensureFixtureUser('support@inchframe.com','Inchframe Support Partner',true);
+      if(!db.prepare("SELECT 1 FROM projects WHERE owner_id=? AND title='Studio workflow test request'").get(chrisId))
+        db.prepare(`INSERT INTO projects (id,owner_id,owner_email,title,project_type,status,brief,audience,platforms,due_date,aspect_ratios,style_notes,budget_range,pending_changes,created_at,updated_at)
+          VALUES ('test-project-chris',?,?, 'Studio workflow test request','brand_film','inquiry_received','Test the editable client project request and Studio approval workflow.','Inchframe customers','Web and social','2026-10-15','[]','','1000_2500','',?,?)`)
+          .run(chrisId,'chris@inchframe.com',now,now);
+      if(!db.prepare('SELECT 1 FROM creator_profiles WHERE user_id=?').get(supportId))
+        db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,pro_confirmed,pro_verified,identity_verified,tax_verified,status,avatar_object_key,avatar_mime_type,pending_change_fields,pending_change_at,created_at,updated_at)
+          VALUES ('test-profile-support',?,?,'Inchframe Support Partner','inchframe-support-partner','Production support for directed AI video workflows','Test Partner profile for reviewing editable rates, availability, work links, and Studio change notices.','Production support, workflow review, AI video','Remote · Pacific','project',500,1500,'Available for test assignments',?,1,0,0,0,'pending','','image/png','["Test Partner profile created"]',?,?,?)`)
+          .run(supportId,'support@inchframe.com','support@inchframe.com',now,now,now);
+      db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(workflowFixtures,now);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
   }
   globalForStudio.inchframeSchemaReady = true;
 }
@@ -444,16 +480,28 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
   const db=database(),now=new Date().toISOString();
   const existing=db.prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
   if(!existing&&!input.avatarKey)throw new Error('A profile icon is required.');
-  if(!existing&&!input.creatorInviteHash)throw new Error('A Studio Partner invite key is required.');
   const id=existing?.id||crypto.randomUUID();
   let slug=existing?.slug||creatorSlug(input.displayName);
   if(!existing){const collision=db.prepare('SELECT 1 FROM creator_profiles WHERE slug=? COLLATE NOCASE').get(slug);if(collision)slug=`${slug.slice(0,45)}-${id.slice(0,8)}`;}
   const avatarKey=input.avatarKey||existing?.avatar_object_key||'';
   const avatarMime=input.avatarMime||existing?.avatar_mime_type||'';
+  const changedFields:string[]=[];
+  if(existing){
+    const comparisons:[string,unknown,unknown][]=[
+      ['Display name',existing.display_name,input.displayName],['Headline',existing.headline,input.headline],['Bio',existing.bio,input.bio],
+      ['Specialties',existing.specialties,input.specialties],['Location',existing.location,input.location],['Rate basis',existing.rate_unit,input.rateUnit],
+      ['Minimum rate',existing.rate_min,input.rateMin],['Maximum rate',existing.rate_max,input.rateMax],['Availability',existing.availability,input.availability],
+    ];
+    for(const[label,before,after]of comparisons)if(before!==after)changedFields.push(label);
+    const priorSamples=db.prepare('SELECT title,url FROM creator_samples WHERE creator_id=? ORDER BY sort_order').all(id) as unknown as {title:string;url:string}[];
+    if(JSON.stringify(priorSamples)!==JSON.stringify(input.samples.slice(0,5)))changedFields.push('Work samples');
+    if(input.avatarKey)changedFields.push('Profile icon');
+  }else changedFields.push('New Partner application');
+  const changedJson=JSON.stringify(changedFields.length?changedFields:['Profile resubmitted']);
   db.exec('BEGIN IMMEDIATE');
   try {
-    if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(user.email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,now,id);
-    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,creator_invite_hash,pro_confirmed,status,avatar_object_key,avatar_mime_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,input.creatorInviteHash||null,avatarKey,avatarMime,now,now);
+    if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,pending_change_fields=?,pending_change_at=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(user.email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,id);
+    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,creator_invite_hash,pro_confirmed,status,avatar_object_key,avatar_mime_type,pending_change_fields,pending_change_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,input.creatorInviteHash||null,avatarKey,avatarMime,changedJson,now,now,now);
     db.prepare('DELETE FROM creator_samples WHERE creator_id=?').run(id);
     const insert=db.prepare('INSERT INTO creator_samples (id,creator_id,title,url,sort_order) VALUES (?,?,?,?,?)');
     input.samples.slice(0,5).forEach((sample,index)=>insert.run(crypto.randomUUID(),id,sample.title,sample.url,index));
@@ -483,7 +531,7 @@ export async function getCreatorApplicationById(id:string) {
 export async function reviewCreatorApplication(id:string,status:'approved'|'declined',verification:{proVerified:boolean;identityVerified:boolean;taxVerified:boolean}) {
   await ensureSchema();
   const now=new Date().toISOString();
-  database().prepare('UPDATE creator_profiles SET status=?,pro_verified=?,identity_verified=?,tax_verified=?,reviewed_at=?,updated_at=? WHERE id=?').run(status,verification.proVerified?1:0,verification.identityVerified?1:0,verification.taxVerified?1:0,now,now,id);
+  database().prepare("UPDATE creator_profiles SET status=?,pro_verified=?,identity_verified=?,tax_verified=?,pending_change_fields='[]',pending_change_at=NULL,reviewed_at=?,updated_at=? WHERE id=?").run(status,verification.proVerified?1:0,verification.identityVerified?1:0,verification.taxVerified?1:0,now,now,id);
 }
 
 export async function listPublicCreators() {
@@ -606,6 +654,49 @@ function addActivityRow(projectId:string,user:ChatGPTUser,role:ProjectActivity['
   database().prepare(`INSERT INTO project_activity (id,project_id,author_id,author_email,author_role,kind,title,body,next_step,needs_response_from,target_date,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(crypto.randomUUID(),projectId,user.userId,user.email,role,input.kind,input.title,input.body,input.nextStep||'',input.needsResponseFrom||'none',cleanDate(input.targetDate),now);
   database().prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now,projectId);
+}
+
+export function pendingProjectEssentials(project:StudioProject):ProjectEssentials|null{
+  if(!project.pending_changes)return null;
+  try{
+    const value=JSON.parse(project.pending_changes) as ProjectEssentials;
+    return value&&typeof value.title==='string'&&typeof value.brief==='string'?value:null;
+  }catch{return null;}
+}
+
+function currentProjectEssentials(project:StudioProject):ProjectEssentials{return{title:project.title,projectType:project.project_type,brief:project.brief,audience:project.audience,platforms:project.platforms,dueDate:project.due_date,budgetRange:project.budget_range};}
+function changedProjectFields(before:ProjectEssentials,after:ProjectEssentials){
+  const labels:[keyof ProjectEssentials,string][]=[['title','Title'],['projectType','Project type'],['brief','Brief'],['audience','Audience'],['platforms','Platforms'],['dueDate','Target date'],['budgetRange','Budget']];
+  return labels.filter(([key])=>before[key]!==after[key]).map(([,label])=>label);
+}
+
+export async function submitProjectEssentialsChange(projectId:string,user:ChatGPTUser,input:ProjectEssentials){
+  const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
+  if(project.owner_id!==user.userId)throw new Error('Only the project client can edit this request.');
+  if(['declined','final_delivery_accepted'].includes(project.status))throw new Error('This project request is closed.');
+  const fields=changedProjectFields(currentProjectEssentials(project),input);
+  if(!fields.length)throw new Error('Change at least one request value before submitting.');
+  const now=new Date().toISOString();
+  database().prepare('UPDATE projects SET pending_changes=?,pending_changes_at=?,updated_at=? WHERE id=?').run(JSON.stringify(input),now,now,projectId);
+  database().prepare("UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE project_id=? AND needs_response_from='admin' AND resolved_at IS NULL AND title='Client request changes submitted'").run(now,user.userId,projectId);
+  addActivityRow(projectId,user,'client',{kind:'decision',title:'Client request changes submitted',body:`Changed: ${fields.join(', ')}.`,needsResponseFrom:'admin',targetDate:input.dueDate});
+  return fields;
+}
+
+export async function reviewProjectEssentialsChange(projectId:string,user:ChatGPTUser,action:'approve'|'decline',note:string){
+  if(!isStudioAdmin(user))throw new Error('Studio admin access required.');
+  const project=await getProjectForUser(projectId,user);if(!project)throw new Error('Project not found.');
+  const pending=pendingProjectEssentials(project);if(!pending)throw new Error('No client changes are waiting for review.');
+  const fields=changedProjectFields(currentProjectEssentials(project),pending),now=new Date().toISOString(),db=database();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    if(action==='approve')db.prepare(`UPDATE projects SET title=?,project_type=?,brief=?,audience=?,platforms=?,due_date=?,budget_range=?,pending_changes='',pending_changes_at=NULL,updated_at=? WHERE id=?`).run(pending.title,pending.projectType,pending.brief,pending.audience,pending.platforms,pending.dueDate,pending.budgetRange,now,projectId);
+    else db.prepare("UPDATE projects SET pending_changes='',pending_changes_at=NULL,updated_at=? WHERE id=?").run(now,projectId);
+    db.prepare("UPDATE project_activity SET resolved_at=?,resolved_by_id=? WHERE project_id=? AND needs_response_from='admin' AND resolved_at IS NULL AND title='Client request changes submitted'").run(now,user.userId,projectId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+  addActivityRow(projectId,user,'admin',{kind:'decision',title:action==='approve'?'Client request changes accepted':'Client request changes declined',body:`${fields.join(', ')}.${note?` ${note}`:''}`});
+  return fields;
 }
 
 export async function productionAgreementReady(projectId:string){

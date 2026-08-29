@@ -11,7 +11,9 @@ import { CreatorAssignmentControls } from '@/components/CreatorAssignmentControl
 import { ProStudioRoutingControls } from '@/components/ProStudioRoutingControls';
 import { ProductionAgreement } from '@/components/ProductionAgreement';
 import { ProjectActivityLog } from '@/components/ProjectActivityLog';
-import { getProjectBundle,isStudioAdmin,listProStudioProposals,listPublicCreators,platformFeeBps,studioMinimumCents } from '@/lib/data';
+import { ProjectRequestEditor } from '@/components/ProjectRequestEditor';
+import { AdminProjectChangeControls } from '@/components/AdminProjectChangeControls';
+import { getProjectBundle,isStudioAdmin,listProStudioProposals,listPublicCreators,pendingProjectEssentials,platformFeeBps,studioMinimumCents } from '@/lib/data';
 import { fileSize,shortDate,titleCase } from '@/lib/format';
 
 export const dynamic='force-dynamic';
@@ -37,6 +39,8 @@ async function ProjectContent({params}:{params:Promise<{id:string}>}) {
   const eligibleCreators=admin?(await listPublicCreators()).filter(creator=>creator.pro_verified===1&&creator.identity_verified===1&&creator.tax_verified===1).map(creator=>({id:creator.id,displayName:creator.display_name,minimum:Math.max(studioMinimumCents()/100,creator.rate_min)})):[];
   const proStudioProposals=admin?await listProStudioProposals(id,user):[];
   const quoteView=bundle.quote?{quote:bundle.quote.quote,offers:bundle.quote.offers,creator:{id:bundle.quote.creator.id,display_name:bundle.quote.creator.display_name,headline:bundle.quote.creator.headline,rate_min:bundle.quote.creator.rate_min}}:null;
+  const currentRequest={title:bundle.project.title,projectType:bundle.project.project_type,brief:bundle.project.brief,audience:bundle.project.audience,platforms:bundle.project.platforms,dueDate:bundle.project.due_date,budgetRange:bundle.project.budget_range};
+  const pendingRequest=pendingProjectEssentials(bundle.project);
 
   return <main className="portal-page">
     <PortalHeader user={user}/>
@@ -46,9 +50,10 @@ async function ProjectContent({params}:{params:Promise<{id:string}>}) {
       <div className="project-facts"><div><span>Status</span><strong>{titleCase(bundle.project.status)}</strong></div><div><span>Target date</span><strong>{shortDate(bundle.project.due_date)}</strong></div><div><span>Budget</span><strong>{titleCase(bundle.project.budget_range)||'To discuss'}</strong></div>{bundle.quote&&<div><span>Studio Partner</span><strong>{bundle.quote.creator.display_name}</strong></div>}</div></div>
     </div></section>
     <section className="project-content"><div className="shell project-layout">
-      <aside><nav className="project-nav"><a href="#overview">Quote + assignment</a>{showProduction&&<><a href="#agreement">Work agreement</a><a href="#activity">Updates + messages <b>{bundle.activity.length}</b></a><a href="#advanced">Advanced brief</a><a href="#seeds">Seed library <b>{seeds.length}</b></a><a href="#audio">Audio <b>{audio.length}</b></a><a href="#review">Review queue <b>{reviews.length}</b></a><a href="#delivery">Final delivery <b>{deliveries.length}</b></a></>}</nav>
+      <aside><nav className="project-nav"><a href="#request">Project request</a><a href="#overview">Quote + assignment</a>{showProduction&&<><a href="#agreement">Work agreement</a><a href="#activity">Updates + messages <b>{bundle.activity.length}</b></a><a href="#advanced">Advanced brief</a><a href="#seeds">Seed library <b>{seeds.length}</b></a><a href="#audio">Audio <b>{audio.length}</b></a><a href="#review">Review queue <b>{reviews.length}</b></a><a href="#delivery">Final delivery <b>{deliveries.length}</b></a></>}</nav>
       <div className="brief-card"><span>Client</span><strong>{creatorViewer?'Private Studio client':bundle.project.owner_email}</strong><span>Audience</span><p>{bundle.project.audience||'Not specified'}</p><span>Platforms</span><p>{bundle.project.platforms||'Not specified'}</p><span>Budget</span><p>{titleCase(bundle.project.budget_range)||'Not specified'}</p>{showProduction&&<><span>Formats</span><p>{formats}</p><span>Style direction</span><p>{bundle.project.style_notes||'Not specified'}</p></>}</div></aside>
       <div className="project-sections">
+        <section id="request" className="portal-card"><div className="card-heading"><div><span>ESSENTIAL BRIEF</span><h2>{admin?'Client change review':creatorViewer?'Project request':'Edit project request'}</h2></div></div>{admin?(pendingRequest?<AdminProjectChangeControls projectId={id} current={currentRequest} pending={pendingRequest}/>:<div className="stage-message good"><strong>No client changes waiting.</strong><p>The accepted project request is shown in the page summary.</p></div>):creatorViewer?<RequestSummary request={currentRequest}/>:<ProjectRequestEditor key={bundle.project.pending_changes_at||bundle.project.updated_at} projectId={id} current={currentRequest} pending={pendingRequest}/>}</section>
         <section id="overview" className="portal-card"><div className="card-heading"><div><span>PRIVATE PROJECT DESK</span><h2>{bundle.quote?'Quote and Studio Partner':admin?'Route this inquiry':'What happens next'}</h2></div></div>
           {quoteView?<QuoteControls projectId={id} bundle={quoteView} viewer={viewer} platformMinimum={studioMinimumCents()} feeBps={platformFeeBps()}/>:admin?<><ProStudioRoutingControls projectId={id} status={bundle.project.marketplace_status} proposals={proStudioProposals}/><CreatorAssignmentControls projectId={id} creators={eligibleCreators}/><details className="legacy-access"><summary>Manual Studio access exception</summary><AdminInquiryControls projectId={id} status={bundle.project.status}/></details></>:<ClientGate projectId={id} status={bundle.project.status} unlocked={clientUnlocked}/>}
         </section>
@@ -60,6 +65,10 @@ async function ProjectContent({params}:{params:Promise<{id:string}>}) {
       </div>
     </div></section>
   </main>;
+}
+
+function RequestSummary({request}:{request:import('@/lib/data').ProjectEssentials}){
+  return <div className="request-summary"><div><span>Project type</span><p>{titleCase(request.projectType)}</p></div><div><span>Brief</span><p>{request.brief}</p></div><div><span>Audience</span><p>{request.audience||'Not specified'}</p></div><div><span>Platforms</span><p>{request.platforms||'Not specified'}</p></div><div><span>Target date</span><p>{shortDate(request.dueDate)}</p></div><div><span>Budget</span><p>{titleCase(request.budgetRange)}</p></div></div>;
 }
 
 function ClientGate({projectId,status,unlocked}:{projectId:string;status:string;unlocked:boolean}) {
