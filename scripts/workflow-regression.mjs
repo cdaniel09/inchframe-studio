@@ -75,6 +75,8 @@ try{
   assert(result.text.includes('Changes waiting for Studio review'),'Chris sees the pending-change state.');
 
   const admin=await signIn('admin','/portal/projects/test-project-chris');
+  let partnerDesk=await request('/portal/studio-partners',{cookie:admin});
+  assert(partnerDesk.response.status===200&&partnerDesk.text.includes('Approved and active')&&!partnerDesk.text.includes('Approve internal profile'),'Approved internal profile shows an active state instead of a disabled approval button.');
   result=await request('/portal/projects/test-project-chris',{cookie:admin});
   assert(result.response.status===200&&result.text.includes('Client changes need acceptance'),'Admin sees the client acceptance review.');
   result=await request('/api/projects/test-project-chris/changes',{cookie:admin,method:'POST',json:{action:'approve',note:'Approved by the workflow regression.'}});
@@ -106,6 +108,7 @@ try{
   console.log('PASS Support Partner profile is editable without a legacy key.');
   console.log('PASS Admin sees the Partner changed-field notice.');
   console.log('PASS Support is assignable through the Partner workflow but excluded from the public directory.');
+  console.log('PASS Approved internal profile has an unambiguous active admin state.');
 }catch(error){console.error(error instanceof Error?error.stack:error);console.error('\nStudio output:\n'+output);process.exitCode=1;}
 finally{
   child.kill();await new Promise(resolve=>{if(child.exitCode!==null)resolve();else{child.once('exit',resolve);setTimeout(resolve,2000);}});

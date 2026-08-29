@@ -16,4 +16,4 @@ y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
 })(window, document, "clarity", "script", "y7ifovxot8");`}}/><script async src="https://www.googletagmanager.com/gtag/js?id=G-KQCZ8BM990"/><script dangerouslySetInnerHTML={{__html:`window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 gtag('js', new Date());
-gtag('config', 'G-KQCZ8BM990');`}}/></head><body>{children}</body></html>;}
+gtag('config', 'G-KQCZ8BM990', {cookie_prefix: 'studio'});`}}/></head><body>{children}</body></html>;}
