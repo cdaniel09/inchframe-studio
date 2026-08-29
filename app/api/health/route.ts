@@ -18,7 +18,7 @@ export async function GET(){
     return Response.json({ok:false,error:'Studio configuration is incomplete.',missing},{status:503});
   try{
     await ensureSchema();
-    return Response.json({ok:true,storage:uploadRoot(),email:'configured',authentication:{mode,accountSso:studioSsoConfigured()?'configured':'unavailable',sessionVersion:2,navigation:'fresh-request'},workflowVersion:8});
+    return Response.json({ok:true,storage:uploadRoot(),email:'configured',authentication:{mode,accountSso:studioSsoConfigured()?'configured':'unavailable',sessionVersion:2,navigation:'fresh-request'},workflowVersion:9});
   }catch(error){
     console.error('Health check failed',error);
     return Response.json({ok:false,error:'Storage is unavailable.'},{status:503});

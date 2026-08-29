@@ -78,7 +78,7 @@ try{
   result=await request('/');
   assert(result.response.status===200&&result.text.includes('href="/register"')&&result.text.includes('href="/studio-partners"')&&result.text.includes('inchframe-watermark-bug.png'),'Public project and Studio Partner calls to action use their required entry pages and the supplied logo appears in the header.');
   result=await request('/studio-partners');
-  assert(result.response.status===200&&result.text.includes('REQUIREMENTS TO APPLY')&&result.text.includes('Independent-contractor eligibility')&&result.text.includes('Client contact kept inside Studio')&&result.text.includes('https://account.inchframe.com/account'),'Studio Partner page states requirements and directs applicants to Account.');
+  assert(result.response.status===200&&result.text.includes('Find your production')&&result.text.includes('For clients')&&result.text.includes('For Partner candidates')&&result.text.includes('REQUIREMENTS TO APPLY')&&result.text.includes('Independent-contractor eligibility')&&result.text.includes('Client contact kept inside Studio'),'Studio Partner page serves clients and Partner candidates while stating application requirements.');
   assert(result.text.includes('/api/auth/account/start?returnTo=%2Fportal%2Fstudio-partners&amp;intent=studio_partner'),'The first Partner action returns an existing Account session to the Partner dashboard.');
   result=await request('/register');
   assert(result.response.status===200&&result.text.includes('CREATE CLIENT ACCESS')&&result.text.includes('Create account'),'Native Studio client signup is available.');
