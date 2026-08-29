@@ -566,7 +566,7 @@ export async function reviewCreatorApplication(id:string,status:'approved'|'decl
 
 export async function listPublicCreators() {
   await ensureSchema();
-  const rows=database().prepare(`SELECT * FROM creator_profiles WHERE status='approved' AND internal_partner=0 ORDER BY display_name COLLATE NOCASE`).all() as unknown as Omit<CreatorProfile,'samples'>[];
+  const rows=database().prepare(`SELECT * FROM creator_profiles WHERE status='approved' ORDER BY internal_partner DESC,display_name COLLATE NOCASE`).all() as unknown as Omit<CreatorProfile,'samples'>[];
   return rows.map(withCreatorSamples);
 }
 
@@ -578,7 +578,7 @@ export async function listAssignableCreators() {
 
 export async function getPublicCreatorBySlug(slug:string) {
   await ensureSchema();
-  const profile=database().prepare(`SELECT * FROM creator_profiles WHERE slug=? COLLATE NOCASE AND status='approved' AND internal_partner=0`).get(slug) as Omit<CreatorProfile,'samples'>|undefined;
+  const profile=database().prepare(`SELECT * FROM creator_profiles WHERE slug=? COLLATE NOCASE AND status='approved'`).get(slug) as Omit<CreatorProfile,'samples'>|undefined;
   return profile?withCreatorSamples(profile):null;
 }
 

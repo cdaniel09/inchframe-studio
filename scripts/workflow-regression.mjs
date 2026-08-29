@@ -89,7 +89,9 @@ try{
   result=await request('/portal/studio-partners',{cookie:support});
   assert(result.response.status===200&&result.text.includes('Internal Partner active')&&result.text.includes('Project requests + assignments'),'Support starts as an active internal Partner.');
   result=await request('/studio-partners');
-  assert(result.response.status===200&&!result.text.includes('Inchframe Support Partner'),'Internal Support Partner is excluded from the public directory.');
+  assert(result.response.status===200&&result.text.includes('Inchframe Support Partner'),'Approved internal Support Partner appears in the public directory.');
+  result=await request('/studio-partners/inchframe-support-partner');
+  assert(result.response.status===200&&result.text.includes('Request this Studio Partner'),'Support has a public Partner profile and request path.');
   result=await request('/portal/projects/test-project-chris',{cookie:admin});
   assert(result.response.status===200&&result.text.includes('Inchframe Support Partner'),'Admin can select Support for the normal Partner workflow.');
   result=await request('/studio-partners/apply',{cookie:support});
@@ -124,7 +126,7 @@ try{
   console.log('PASS Admin can inspect and accept client changes.');
   console.log('PASS Support Partner profile is editable without a legacy key.');
   console.log('PASS Admin sees the Partner changed-field notice.');
-  console.log('PASS Support is assignable through the Partner workflow but excluded from the public directory.');
+  console.log('PASS Support is assignable and displayed in the public Studio Partner directory.');
   console.log('PASS Approved internal profile has an unambiguous active admin state.');
   console.log('PASS cdaniel09@gmail.com can manage the shared Support profile while retaining admin review.');
 }catch(error){console.error(error instanceof Error?error.stack:error);console.error('\nStudio output:\n'+output);process.exitCode=1;}
