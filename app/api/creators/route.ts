@@ -1,7 +1,6 @@
 import {getChatGPTUser} from '@/app/chatgpt-auth';
 import {getAccountSsoEligibility,getCreatorApplicationForUser,saveCreatorApplication} from '@/lib/data';
 import {sendCreatorApplicationEmails} from '@/lib/email';
-import {verifyCreatorInvite} from '@/lib/creator-invite';
 import {deleteStoredFile,writeStoredFile} from '@/lib/storage';
 
 export const runtime='nodejs';
@@ -16,7 +15,8 @@ export async function POST(request:Request){
   if(request.headers.get('sec-fetch-site')==='cross-site')return Response.json({error:'Cross-site request rejected.'},{status:403});
   let form:FormData;
   try{form=await request.formData();}catch{return Response.json({error:'Invalid application.'},{status:400});}
-  if(form.get('proConfirmed')!=='yes'||form.get('contractorConfirmed')!=='yes'||form.get('contactConfirmed')!=='yes'||form.get('verificationConfirmed')!=='yes')
+  const existing=await getCreatorApplicationForUser(user),internalPartner=existing?.internal_partner===1;
+  if(!internalPartner&&(form.get('proConfirmed')!=='yes'||form.get('contractorConfirmed')!=='yes'||form.get('contactConfirmed')!=='yes'||form.get('verificationConfirmed')!=='yes'))
     return Response.json({error:'Confirm Paid Pro eligibility, subcontractor status, the contact policy, and verification requirements.'},{status:400});
   const displayName=text(form,'displayName',80),headline=text(form,'headline',120),bio=text(form,'bio',1200);
   const specialties=text(form,'specialties',300),location=text(form,'location',100),availability=text(form,'availability',120);
@@ -26,18 +26,12 @@ export async function POST(request:Request){
     !['project','day','hour'].includes(rateUnit)||!Number.isInteger(rateMin)||!Number.isInteger(rateMax)||
     rateMin<1||rateMax<rateMin||rateMax>1000000)
     return Response.json({error:'Complete the profile and enter a valid rate range.'},{status:400});
-  const existing=await getCreatorApplicationForUser(user);
   if(existing&&existing.inchframe_email!==inchframeEmail)
     return Response.json({error:'The verified Inchframe account email cannot be changed on an existing Studio Partner profile.'},{status:400});
   const account=await getAccountSsoEligibility(user),accountLinked=account?.auth_source==='account';
   if(accountLinked&&inchframeEmail!==user.email.toLowerCase())
     return Response.json({error:'The application email must match your verified Inchframe Account.'},{status:400});
-  let creatorInviteHash:string|undefined;
-  if(!existing&&!account?.studio_partner_eligible){
-    if(accountLinked)return Response.json({error:'An active paid Pro Account with Studio Partner eligibility is required.'},{status:403});
-    try{creatorInviteHash=verifyCreatorInvite(text(form,'creatorInviteKey',4096),inchframeEmail);}
-    catch(reason){return Response.json({error:reason instanceof Error?reason.message:'Invalid Studio Partner invite key.'},{status:400});}
-  }
+  if(!existing&&!account?.studio_partner_eligible)return Response.json({error:'An active paid Pro Account with Studio Partner eligibility is required.'},{status:403});
   const samples=[];
   for(let index=1;index<=5;index++){
     const title=text(form,`sampleTitle${index}`,100),sampleUrl=url(text(form,`sampleUrl${index}`,500));
@@ -56,15 +50,13 @@ export async function POST(request:Request){
   }
   try{
     const result=await saveCreatorApplication(user,{displayName,headline,bio,specialties,location,availability,inchframeEmail,
-      creatorInviteHash,rateUnit:rateUnit as 'project'|'day'|'hour',rateMin,rateMax,samples,avatarKey,avatarMime});
+      rateUnit:rateUnit as 'project'|'day'|'hour',rateMin,rateMax,samples,avatarKey,avatarMime});
     if(avatarKey&&result.oldAvatarKey&&result.oldAvatarKey!==avatarKey)await deleteStoredFile(result.oldAvatarKey);
-    try{await sendCreatorApplicationEmails({email:user.email,displayName,profileId:result.id,updated:Boolean(existing)});}
+    try{await sendCreatorApplicationEmails({email:user.email,displayName,profileId:result.id,updated:Boolean(existing),internalPartner});}
     catch(error){console.error('Studio Partner application email failed',error);}
     return Response.json({id:result.id},{status:201});
   }catch(error){
     if(avatarKey)await deleteStoredFile(avatarKey);
-    if(error instanceof Error&&error.message.includes('UNIQUE constraint failed: creator_profiles.creator_invite_hash'))
-      return Response.json({error:'This Studio Partner invite key has already been used.'},{status:409});
     throw error;
   }
 }

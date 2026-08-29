@@ -83,6 +83,12 @@ try{
   assert(result.response.status===200&&result.text.includes('Studio workflow test request — revised')&&!result.text.includes('Changes waiting for Studio review'),'Accepted client values became the live project.');
 
   const support=await signIn('support','/studio-partners/apply','studio_partner');
+  result=await request('/portal/studio-partners',{cookie:support});
+  assert(result.response.status===200&&result.text.includes('Internal Partner active')&&result.text.includes('Project requests + assignments'),'Support starts as an active internal Partner.');
+  result=await request('/studio-partners');
+  assert(result.response.status===200&&!result.text.includes('Inchframe Support Partner'),'Internal Support Partner is excluded from the public directory.');
+  result=await request('/portal/projects/test-project-chris',{cookie:admin});
+  assert(result.response.status===200&&result.text.includes('Inchframe Support Partner'),'Admin can select Support for the normal Partner workflow.');
   result=await request('/studio-partners/apply',{cookie:support});
   assert(result.response.status===200&&result.text.includes('Update application'),'Support can open an editable Partner application.');
   const form=new FormData();
@@ -91,10 +97,15 @@ try{
   assert(result.response.status===201,`Support Partner update failed: ${result.response.status} ${result.text}`);
   result=await request('/portal/studio-partners',{cookie:admin});
   assert(result.response.status===200&&result.text.includes('Partner changed values')&&result.text.includes('Minimum rate')&&result.text.includes('Availability')&&result.text.includes('Work samples'),'Admin sees the Partner changed-value notice.');
+  result=await request('/api/creators/test-profile-support/review',{cookie:admin,method:'POST',json:{action:'approve',proVerified:false,identityVerified:false,taxVerified:false}});
+  assert(result.response.status===200,`Internal Partner reapproval failed: ${result.response.status} ${result.text}`);
+  result=await request('/portal/studio-partners',{cookie:support});
+  assert(result.response.status===200&&result.text.includes('Internal Partner active'),'Support returns to active Partner status after admin review.');
   console.log('PASS Chris client request is editable and change-controlled.');
   console.log('PASS Admin can inspect and accept client changes.');
   console.log('PASS Support Partner profile is editable without a legacy key.');
   console.log('PASS Admin sees the Partner changed-field notice.');
+  console.log('PASS Support is assignable through the Partner workflow but excluded from the public directory.');
 }catch(error){console.error(error instanceof Error?error.stack:error);console.error('\nStudio output:\n'+output);process.exitCode=1;}
 finally{
   child.kill();await new Promise(resolve=>{if(child.exitCode!==null)resolve();else{child.once('exit',resolve);setTimeout(resolve,2000);}});

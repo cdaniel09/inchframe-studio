@@ -13,7 +13,7 @@ import { ProductionAgreement } from '@/components/ProductionAgreement';
 import { ProjectActivityLog } from '@/components/ProjectActivityLog';
 import { ProjectRequestEditor } from '@/components/ProjectRequestEditor';
 import { AdminProjectChangeControls } from '@/components/AdminProjectChangeControls';
-import { getProjectBundle,isStudioAdmin,listProStudioProposals,listPublicCreators,pendingProjectEssentials,platformFeeBps,studioMinimumCents } from '@/lib/data';
+import { getProjectBundle,isStudioAdmin,listAssignableCreators,listProStudioProposals,pendingProjectEssentials,platformFeeBps,studioMinimumCents } from '@/lib/data';
 import { fileSize,shortDate,titleCase } from '@/lib/format';
 
 export const dynamic='force-dynamic';
@@ -36,7 +36,7 @@ async function ProjectContent({params}:{params:Promise<{id:string}>}) {
   let formats='To confirm';try{formats=(JSON.parse(bundle.project.aspect_ratios||'[]') as string[]).join(', ')||'To confirm';}catch{}
   const showProduction=admin||clientUnlocked;
   const advancedFormProject={advanced_brief:bundle.project.advanced_brief,must_have:bundle.project.must_have,avoid_notes:bundle.project.avoid_notes,reference_links:bundle.project.reference_links,audio_notes:bundle.project.audio_notes,aspect_ratios:bundle.project.aspect_ratios,style_notes:bundle.project.style_notes};
-  const eligibleCreators=admin?(await listPublicCreators()).filter(creator=>creator.pro_verified===1&&creator.identity_verified===1&&creator.tax_verified===1).map(creator=>({id:creator.id,displayName:creator.display_name,minimum:Math.max(studioMinimumCents()/100,creator.rate_min)})):[];
+  const eligibleCreators=admin?(await listAssignableCreators()).map(creator=>({id:creator.id,displayName:creator.display_name,minimum:Math.max(studioMinimumCents()/100,creator.rate_min)})):[];
   const proStudioProposals=admin?await listProStudioProposals(id,user):[];
   const quoteView=bundle.quote?{quote:bundle.quote.quote,offers:bundle.quote.offers,creator:{id:bundle.quote.creator.id,display_name:bundle.quote.creator.display_name,headline:bundle.quote.creator.headline,rate_min:bundle.quote.creator.rate_min}}:null;
   const currentRequest={title:bundle.project.title,projectType:bundle.project.project_type,brief:bundle.project.brief,audience:bundle.project.audience,platforms:bundle.project.platforms,dueDate:bundle.project.due_date,budgetRange:bundle.project.budget_range};

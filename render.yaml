@@ -35,8 +35,6 @@ services:
         value: admin@inchframe.com
       - key: INQUIRY_NOTIFICATION_EMAIL
         value: info@inchframe.com
-      - key: CREATOR_INVITE_SECRET
-        sync: false
       - key: STUDIO_MIN_PROJECT_CENTS
         value: 30000
       - key: STUDIO_REVIEW_THRESHOLD_CENTS

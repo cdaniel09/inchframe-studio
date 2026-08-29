@@ -26,9 +26,9 @@ export default async function CreatorApplyPage({searchParams}:{searchParams:Prom
       <div className="creator-policy"><strong>Eligible paid membership required.</strong><p>Studio Partner approval is reviewed—not automatic. Your public page shows your icon, production strengths, work rates, and up to five external sample links. Personal contact details stay private.</p></div>
       {linked&&!eligible&&!profile?<div className="empty-state">
         <span>PAID PRO REQUIRED</span><h2>Refresh your Studio Partner eligibility.</h2>
-        <p>Your Account login is working, but Studio has not received current paid Pro Partner eligibility. Activate paid Pro or generate the Partner invitation in Account, then refresh here.</p>
+        <p>Your Account login is working, but Studio has not received current paid Pro Partner eligibility. Activate paid Pro, then refresh your Account connection here.</p>
         <div className="hero-actions"><a className="button button-green" href="/api/auth/account/start?returnTo=%2Fstudio-partners%2Fapply&intent=studio_partner">Refresh from Inchframe Account →</a><a className="button button-outline" href="https://account.inchframe.com/account">Open Account</a></div>
-      </div>:<CreatorApplicationForm profile={profile} accountEmail={linked?user.email:null} ssoEligible={eligible}/>}
+      </div>:<CreatorApplicationForm profile={profile} accountEmail={linked?user.email:null} internalPartner={profile?.internal_partner===1}/>}
     </div></section>
     <SiteFooter/>
   </main>;

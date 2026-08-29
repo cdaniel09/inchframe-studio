@@ -41,7 +41,6 @@ Add these secret values in Render:
 - `SMTP_PASS` — the mailbox password for `info@inchframe.com`, not the Hostinger account password.
 - `STRIPE_SECRET_KEY` — the live secret key for the Inchframe platform account.
 - `STRIPE_WEBHOOK_SECRET` — the signing secret for the live Studio webhook endpoint.
-- `CREATOR_INVITE_SECRET` — the same signing secret used by the paid Inchframe account service.
 - `STUDIO_SSO_CLIENT_SECRET` — the same confidential SSO client secret configured on Inchframe Account.
 
 The Blueprint supplies `ACCOUNT_SSO_BASE_URL`, client ID, exact callback URI, hybrid rollout mode, `smtp.hostinger.com`, port `465`, `info@inchframe.com`, and the public Studio URL. Render generates `AUTH_SECRET` automatically. Never put real passwords or secret values in Git.
@@ -63,7 +62,7 @@ This single-instance disk design keeps initial cost and operations low. Move the
 
 ## Studio Partner eligibility
 
-Account SSO is the primary source of paid Pro Studio Partner eligibility. The manual invitation key remains only as a migration fallback for legacy Studio identities. Configure the same long random `CREATOR_INVITE_SECRET` on both services until that fallback is retired.
+Account SSO is the sole source of paid Pro Studio Partner eligibility. External applicants must sign in with a verified active Paid Pro Inchframe Account. Studio approval remains separate and does not automatically follow Account eligibility.
 
 Key format: `ifc1.<base64url-json>.<base64url-hmac>`
 
@@ -73,4 +72,4 @@ Payload:
 {"v":1,"email":"member@example.com","plan":"pro","purpose":"creator","exp":1770000000,"nonce":"uuid"}
 ```
 
-Sign the ASCII string `ifc1.<base64url-json>` with HMAC-SHA256 and encode the signature as unpadded base64url. Studio requires the payload email to match the private Inchframe email in the application, rejects expired/non-Pro keys, and stores a SHA-256 hash under a unique constraint so one key cannot establish multiple creator profiles. A seven-day expiry is recommended. Do not put invite keys in URLs; let the member copy and paste the key from their paid account.
+`support@inchframe.com` is provisioned as the private Inchframe house production Partner. It uses the same quote, agreement, activity, review, and delivery workflow but is excluded from the public Partner directory and independent-contractor verification requirements.

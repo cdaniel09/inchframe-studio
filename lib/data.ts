@@ -43,7 +43,7 @@ export type StudioSsoTransaction = {
   state_hash:string;code_verifier:string;return_to:string;intent:'customer'|'studio_partner';expires_at:string;
 };
 export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
-export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;pending_change_fields:string;pending_change_at:string|null;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
+export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;internal_partner:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;pending_change_fields:string;pending_change_at:string|null;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
 export type ProjectEssentials={title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string};
 export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
 export type QuoteOffer={id:string;quote_id:string;actor_id:string;actor_role:'creator'|'client';amount_cents:number;note:string;created_at:string};
@@ -247,6 +247,7 @@ export async function ensureSchema() {
   addColumn('creator_profiles',creatorColumns,'tax_verified','INTEGER NOT NULL DEFAULT 0');
   addColumn('creator_profiles',creatorColumns,'pending_change_fields',"TEXT NOT NULL DEFAULT '[]'");
   addColumn('creator_profiles',creatorColumns,'pending_change_at','TEXT');
+  addColumn('creator_profiles',creatorColumns,'internal_partner','INTEGER NOT NULL DEFAULT 0');
 
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token_hash) WHERE verification_token_hash IS NOT NULL;
@@ -315,6 +316,17 @@ export async function ensureSchema() {
           VALUES ('test-profile-support',?,?,'Inchframe Support Partner','inchframe-support-partner','Production support for directed AI video workflows','Test Partner profile for reviewing editable rates, availability, work links, and Studio change notices.','Production support, workflow review, AI video','Remote · Pacific','project',500,1500,'Available for test assignments',?,1,0,0,0,'pending','','image/png','["Test Partner profile created"]',?,?,?)`)
           .run(supportId,'support@inchframe.com','support@inchframe.com',now,now,now);
       db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(workflowFixtures,now);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
+  const supportPartnerMigration='support-house-partner-v1';
+  if(!db.prepare('SELECT 1 FROM schema_migrations WHERE key=?').get(supportPartnerMigration)){
+    const now=new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      db.prepare(`UPDATE creator_profiles SET internal_partner=1,status='approved',pro_confirmed=1,pro_verified=0,identity_verified=0,tax_verified=0,
+        pending_change_fields='[]',pending_change_at=NULL,reviewed_at=?,updated_at=? WHERE owner_email='support@inchframe.com' COLLATE NOCASE`).run(now,now);
+      db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(supportPartnerMigration,now);
       db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
@@ -475,7 +487,7 @@ function withCreatorSamples(profile:Omit<CreatorProfile,'samples'>&{creator_invi
 
 function creatorSlug(value:string){const normalized=value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,54);return normalized||'creator';}
 
-export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName:string;headline:string;bio:string;specialties:string;location:string;rateUnit:'project'|'day'|'hour';rateMin:number;rateMax:number;availability:string;inchframeEmail:string;creatorInviteHash?:string;samples:{title:string;url:string}[];avatarKey?:string;avatarMime?:string}) {
+export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName:string;headline:string;bio:string;specialties:string;location:string;rateUnit:'project'|'day'|'hour';rateMin:number;rateMax:number;availability:string;inchframeEmail:string;samples:{title:string;url:string}[];avatarKey?:string;avatarMime?:string}) {
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
   const existing=db.prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
@@ -501,7 +513,7 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
   db.exec('BEGIN IMMEDIATE');
   try {
     if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,pending_change_fields=?,pending_change_at=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(user.email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,id);
-    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,creator_invite_hash,pro_confirmed,status,avatar_object_key,avatar_mime_type,pending_change_fields,pending_change_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,input.creatorInviteHash||null,avatarKey,avatarMime,changedJson,now,now,now);
+    else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,pro_confirmed,status,avatar_object_key,avatar_mime_type,pending_change_fields,pending_change_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,now);
     db.prepare('DELETE FROM creator_samples WHERE creator_id=?').run(id);
     const insert=db.prepare('INSERT INTO creator_samples (id,creator_id,title,url,sort_order) VALUES (?,?,?,?,?)');
     input.samples.slice(0,5).forEach((sample,index)=>insert.run(crypto.randomUUID(),id,sample.title,sample.url,index));
@@ -536,23 +548,29 @@ export async function reviewCreatorApplication(id:string,status:'approved'|'decl
 
 export async function listPublicCreators() {
   await ensureSchema();
-  const rows=database().prepare(`SELECT * FROM creator_profiles WHERE status='approved' ORDER BY display_name COLLATE NOCASE`).all() as unknown as Omit<CreatorProfile,'samples'>[];
+  const rows=database().prepare(`SELECT * FROM creator_profiles WHERE status='approved' AND internal_partner=0 ORDER BY display_name COLLATE NOCASE`).all() as unknown as Omit<CreatorProfile,'samples'>[];
+  return rows.map(withCreatorSamples);
+}
+
+export async function listAssignableCreators() {
+  await ensureSchema();
+  const rows=database().prepare(`SELECT * FROM creator_profiles WHERE status='approved' AND (internal_partner=1 OR (pro_verified=1 AND identity_verified=1 AND tax_verified=1)) ORDER BY internal_partner DESC,display_name COLLATE NOCASE`).all() as unknown as Omit<CreatorProfile,'samples'>[];
   return rows.map(withCreatorSamples);
 }
 
 export async function getPublicCreatorBySlug(slug:string) {
   await ensureSchema();
-  const profile=database().prepare(`SELECT * FROM creator_profiles WHERE slug=? COLLATE NOCASE AND status='approved'`).get(slug) as Omit<CreatorProfile,'samples'>|undefined;
+  const profile=database().prepare(`SELECT * FROM creator_profiles WHERE slug=? COLLATE NOCASE AND status='approved' AND internal_partner=0`).get(slug) as Omit<CreatorProfile,'samples'>|undefined;
   return profile?withCreatorSamples(profile):null;
 }
 
 export async function getCreatorIconForViewer(id:string,user:ChatGPTUser|null) {
   await ensureSchema();
-  const profile=database().prepare('SELECT user_id,status,avatar_object_key,avatar_mime_type FROM creator_profiles WHERE id=?').get(id) as {user_id:string;status:string;avatar_object_key:string;avatar_mime_type:string}|undefined;
+  const profile=database().prepare('SELECT user_id,status,avatar_object_key,avatar_mime_type,display_name FROM creator_profiles WHERE id=?').get(id) as {user_id:string;status:string;avatar_object_key:string;avatar_mime_type:string;display_name:string}|undefined;
   if(!profile)return null;
   const publicIcon=profile.status==='approved';
   if(!publicIcon&&(!user||(profile.user_id!==user.userId&&!isStudioAdmin(user))))return null;
-  return {objectKey:profile.avatar_object_key,mimeType:profile.avatar_mime_type,public:publicIcon};
+  return {objectKey:profile.avatar_object_key,mimeType:profile.avatar_mime_type,displayName:profile.display_name,public:publicIcon};
 }
 
 export async function checkRateLimit(action:string,identifier:string,limit:number,windowMs:number) {
@@ -791,13 +809,13 @@ export async function getProjectQuoteBundle(projectId:string):Promise<ProjectQuo
 }
 
 function verifiedStudioPartnerForUser(userId:string){
-  return database().prepare(`SELECT * FROM creator_profiles WHERE user_id=? AND status='approved' AND pro_verified=1 AND identity_verified=1 AND tax_verified=1`).get(userId) as Omit<CreatorProfile,'samples'>|undefined;
+  return database().prepare(`SELECT * FROM creator_profiles WHERE user_id=? AND status='approved' AND (internal_partner=1 OR (pro_verified=1 AND identity_verified=1 AND tax_verified=1))`).get(userId) as Omit<CreatorProfile,'samples'>|undefined;
 }
 
 export async function getStudioPartnerEligibility(user:ChatGPTUser){
   await ensureSchema();
   const profile=database().prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
-  return {eligible:Boolean(profile&&profile.status==='approved'&&profile.pro_verified&&profile.identity_verified&&profile.tax_verified),profile:profile?withCreatorSamples(profile):null};
+  return {eligible:Boolean(profile&&profile.status==='approved'&&(profile.internal_partner===1||(profile.pro_verified&&profile.identity_verified&&profile.tax_verified))),profile:profile?withCreatorSamples(profile):null};
 }
 
 export async function listProStudioOpportunities(user:ChatGPTUser):Promise<ProStudioOpportunity[]>{
@@ -899,7 +917,7 @@ export async function routeProStudioProposal(projectId:string,proposalId:string,
 export async function assignCreatorToProject(projectId:string,creatorId:string){
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
-  const creator=db.prepare(`SELECT id,display_name FROM creator_profiles WHERE id=? AND status='approved' AND pro_verified=1 AND identity_verified=1 AND tax_verified=1`).get(creatorId) as {id:string;display_name:string}|undefined;
+  const creator=db.prepare(`SELECT id,display_name FROM creator_profiles WHERE id=? AND status='approved' AND (internal_partner=1 OR (pro_verified=1 AND identity_verified=1 AND tax_verified=1))`).get(creatorId) as {id:string;display_name:string}|undefined;
   if(!creator)throw new Error('Choose a fully verified, approved Studio Partner.');
   db.exec('BEGIN IMMEDIATE');
   try{
