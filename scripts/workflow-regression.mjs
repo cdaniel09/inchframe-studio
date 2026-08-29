@@ -51,8 +51,14 @@ async function signIn(code,returnTo,intent='customer'){
   if(callback.status!==303)throw new Error(`SSO callback failed for ${code}: ${callback.status}`);
   return cookieFrom(callback);
 }
-async function request(pathname,{cookie,method='GET',json,form}={}){
-  const headers={};if(cookie)headers.cookie=cookie;if(json)headers['content-type']='application/json';
+async function localSignIn(email,password,returnTo){
+  const form=new FormData();form.set('email',email);form.set('password',password);form.set('returnTo',returnTo);
+  const response=await fetch(`${base}/api/auth/login`,{method:'POST',headers:{accept:'application/json','x-requested-with':'InchframeStudio'},body:form,redirect:'manual'});
+  if(response.status!==200)throw new Error(`Native Studio login failed: ${response.status} ${await response.text()}`);
+  return cookieFrom(response);
+}
+async function request(pathname,{cookie,method='GET',json,form,headers:additionalHeaders={}}={}){
+  const headers={...additionalHeaders};if(cookie)headers.cookie=cookie;if(json)headers['content-type']='application/json';
   const response=await fetch(`${base}${pathname}`,{method,headers,body:json?JSON.stringify(json):form,redirect:'manual'});
   const text=await response.text();return{response,text};
 }
@@ -62,13 +68,23 @@ await rm(temp,{recursive:true,force:true});await mkdir(path.join(temp,'uploads')
 await listen(mock,mockPort);
 let output='';
 const nextBin=path.join(repo,'node_modules','next','dist','bin','next');
-const child=spawn(process.execPath,[nextBin,'start','-p',String(studioPort)],{cwd:repo,env:{...process.env,NODE_ENV:'production',DATABASE_PATH:path.join(temp,'studio.sqlite'),UPLOAD_DIR:path.join(temp,'uploads'),AUTH_SECRET:'workflow-regression-secret-at-least-32-characters',ADMIN_EMAIL:'admin@inchframe.com',INQUIRY_NOTIFICATION_EMAIL:'admin@inchframe.com',STUDIO_AUTH_MODE:'account',ACCOUNT_SSO_BASE_URL:`http://127.0.0.1:${mockPort}`,STUDIO_SSO_CLIENT_ID:'workflow-client',STUDIO_SSO_CLIENT_SECRET:'workflow-secret',STUDIO_SSO_REDIRECT_URI:`${base}/api/auth/account/callback`,NEXT_PUBLIC_SITE_URL:base}});
+const child=spawn(process.execPath,[nextBin,'start','-p',String(studioPort)],{cwd:repo,env:{...process.env,NODE_ENV:'production',DATABASE_PATH:path.join(temp,'studio.sqlite'),UPLOAD_DIR:path.join(temp,'uploads'),AUTH_SECRET:'workflow-regression-secret-at-least-32-characters',ADMIN_EMAIL:'admin@inchframe.com',ADMIN_PASSWORD_HASH:'scrypt$workflow-native-login$D5BDbgJcG_8dCShLhkifddlS4ER4_a-ZM_IdKcRGrPD1nPVL0nTNUpNM-hrWaWFwEfjHRUtvdVAz5Ch-YHKbbw',INQUIRY_NOTIFICATION_EMAIL:'admin@inchframe.com',STUDIO_AUTH_MODE:'hybrid',ACCOUNT_SSO_BASE_URL:`http://127.0.0.1:${mockPort}`,STUDIO_SSO_CLIENT_ID:'workflow-client',STUDIO_SSO_CLIENT_SECRET:'workflow-secret',STUDIO_SSO_REDIRECT_URI:`${base}/api/auth/account/callback`,NEXT_PUBLIC_SITE_URL:base}});
 child.stdout.on('data',chunk=>output=(output+chunk.toString()).slice(-30000));child.stderr.on('data',chunk=>output=(output+chunk.toString()).slice(-30000));
 
 try{
   await waitForStudio(child,()=>output);
+  let result=await request('/login');
+  assert(result.response.status===200&&result.text.includes('SIGN IN TO STUDIO')&&result.text.indexOf('SIGN IN TO STUDIO')<result.text.indexOf('INCHFRAME ACCOUNT')&&result.text.includes('Create a client account'),'Studio email/password is the default sign-in and Account remains secondary.');
+  result=await request('/register');
+  assert(result.response.status===200&&result.text.includes('CREATE CLIENT ACCESS')&&result.text.includes('Create account'),'Native Studio client signup is available.');
+  const invalidSignup=new FormData();invalidSignup.set('displayName','Test Client');invalidSignup.set('email','client@example.com');invalidSignup.set('password','short');
+  result=await request('/api/auth/register',{method:'POST',form:invalidSignup,headers:{accept:'application/json','x-requested-with':'InchframeStudio'}});
+  assert(result.response.status===400&&result.text.includes('at least 10 characters'),'Native Studio registration API accepts the signup flow and validates input.');
+  const nativeAdmin=await localSignIn('admin@inchframe.com','Workflow-password-123!','/portal');
+  result=await request('/portal',{cookie:nativeAdmin});
+  assert(result.response.status===200&&result.text.includes('Studio production desk'),'Email/password login creates a durable authenticated Studio session.');
   const chris=await signIn('chris','/portal/projects/test-project-chris');
-  let result=await request('/portal/projects/test-project-chris',{cookie:chris});
+  result=await request('/portal/projects/test-project-chris',{cookie:chris});
   assert(result.response.status===200&&result.text.includes('Edit project request'),'Chris can open an editable project request.');
   result=await request('/api/projects/test-project-chris/changes',{cookie:chris,method:'POST',json:{action:'submit',title:'Studio workflow test request — revised',projectType:'brand_film',brief:'Test the editable client project request, admin acceptance, and retained project history.',audience:'Inchframe customers and Studio clients',platforms:'Web, social, and launch page',dueDate:'2026-10-22',budgetRange:'2500_5000'}});
   assert(result.response.status===200,`Chris change request failed: ${result.response.status} ${result.text}`);
@@ -129,6 +145,7 @@ try{
   console.log('PASS Support is assignable and displayed in the public Studio Partner directory.');
   console.log('PASS Approved internal profile has an unambiguous active admin state.');
   console.log('PASS cdaniel09@gmail.com can manage the shared Support profile while retaining admin review.');
+  console.log('PASS Studio client signup is restored and email/password is the default sign-in.');
 }catch(error){console.error(error instanceof Error?error.stack:error);console.error('\nStudio output:\n'+output);process.exitCode=1;}
 finally{
   child.kill();await new Promise(resolve=>{if(child.exitCode!==null)resolve();else{child.once('exit',resolve);setTimeout(resolve,2000);}});

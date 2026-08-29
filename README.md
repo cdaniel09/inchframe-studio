@@ -51,8 +51,10 @@ After the service is live, add `studio.inchframe.com` as a custom domain and poi
 
 ## Access
 
-- Account-first login: `/login` → Inchframe Account → Studio callback.
-- Studio authentication is Account-only (`STUDIO_AUTH_MODE=account`) so one verified Inchframe Account session is used across the platform.
+- Studio client signup: `/register` creates email/password access and sends email verification before inquiry submission.
+- Default sign-in: `/login` presents Studio email/password first.
+- Account-directed sign-in: Account SSO remains available for users arriving from Inchframe Account and is required to refresh paid Pro Studio Partner eligibility.
+- Studio authentication uses `STUDIO_AUTH_MODE=hybrid` so native client access and Account SSO share the same durable Studio session system.
 - Partner application: `/studio-partners/apply` requests `studio_partner` intent and refreshes paid Pro eligibility from Account.
 - Portal: `/portal`.
 - Admin operations: `/portal/operations` aggregates all project agreements, action items, blockers, pending reviews, deadlines, and recent activity.

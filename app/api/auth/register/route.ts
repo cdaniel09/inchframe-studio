@@ -4,7 +4,6 @@ import { sendVerificationEmail } from '@/lib/email';
 import { hashPassword } from '@/lib/password';
 import { publicUrl } from '@/lib/public-url';
 import { createOpaqueToken, hashToken } from '@/lib/tokens';
-import {studioAuthMode,studioSsoConfigured} from '@/lib/account-sso';
 
 export const runtime='nodejs';
 function wantsJson(request:Request){return request.headers.get('accept')?.includes('application/json')===true;}
@@ -13,7 +12,6 @@ function failure(request:Request,code:'fields'|'exists'|'rate'|'email',message:s
 function clientIp(request:Request){return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';}
 
 export async function POST(request:Request) {
-  if(studioSsoConfigured()&&studioAuthMode()!=='local')return Response.json({error:'Create your account through Inchframe Account.'},{status:410,headers:{'cache-control':'no-store'}});
   if(request.headers.get('sec-fetch-site')==='cross-site') return Response.json({error:'Cross-site request rejected.'},{status:403});
   let form:FormData;
   try{form=await request.formData();}catch{return Response.json({error:'Invalid registration request.'},{status:400});}
