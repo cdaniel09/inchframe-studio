@@ -43,7 +43,7 @@ Add these secret values in Render:
 - `STRIPE_WEBHOOK_SECRET` — the signing secret for the live Studio webhook endpoint.
 - `STUDIO_SSO_CLIENT_SECRET` — the same confidential SSO client secret configured on Inchframe Account.
 
-The Blueprint supplies `ACCOUNT_SSO_BASE_URL`, client ID, exact callback URI, hybrid rollout mode, `smtp.hostinger.com`, port `465`, `info@inchframe.com`, and the public Studio URL. Render generates `AUTH_SECRET` automatically. Never put real passwords or secret values in Git.
+The Blueprint supplies `ACCOUNT_SSO_BASE_URL`, client ID, exact callback URI, Account-only authentication mode, `smtp.hostinger.com`, port `465`, `info@inchframe.com`, and the public Studio URL. Render generates `AUTH_SECRET` automatically. Never put real passwords or secret values in Git.
 
 In Stripe Workbench, create a webhook endpoint at `https://studio.inchframe.com/api/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Deposit Checkout is implemented against the platform account. Connected-account onboarding and automated creator transfers should be enabled only after the production Connect account configuration is approved; until then, creator payout remains an admin accounting step.
 
@@ -52,7 +52,7 @@ After the service is live, add `studio.inchframe.com` as a custom domain and poi
 ## Access
 
 - Account-first login: `/login` → Inchframe Account → Studio callback.
-- Temporary migration fallback: existing Studio credentials remain under the collapsed legacy sign-in while `STUDIO_AUTH_MODE=hybrid`.
+- Studio authentication is Account-only (`STUDIO_AUTH_MODE=account`) so one verified Inchframe Account session is used across the platform.
 - Partner application: `/studio-partners/apply` requests `studio_partner` intent and refreshes paid Pro eligibility from Account.
 - Portal: `/portal`.
 - Admin operations: `/portal/operations` aggregates all project agreements, action items, blockers, pending reviews, deadlines, and recent activity.
@@ -64,12 +64,4 @@ This single-instance disk design keeps initial cost and operations low. Move the
 
 Account SSO is the sole source of paid Pro Studio Partner eligibility. External applicants must sign in with a verified active Paid Pro Inchframe Account. Studio approval remains separate and does not automatically follow Account eligibility.
 
-Key format: `ifc1.<base64url-json>.<base64url-hmac>`
-
-Payload:
-
-```json
-{"v":1,"email":"member@example.com","plan":"pro","purpose":"creator","exp":1770000000,"nonce":"uuid"}
-```
-
-`support@inchframe.com` is provisioned as the private Inchframe house production Partner. It uses the same quote, agreement, activity, review, and delivery workflow but is excluded from the public Partner directory and independent-contractor verification requirements.
+`support@inchframe.com` is provisioned as the private Inchframe house production Partner. It uses the same quote, agreement, activity, review, and delivery workflow but is excluded from the public Partner directory and independent-contractor verification requirements. `cdaniel09@gmail.com` is a shared profile manager with Studio admin authority: it can edit and review this internal profile, while Partner production actions continue to use the Support identity.

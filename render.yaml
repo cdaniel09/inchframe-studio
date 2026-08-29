@@ -22,7 +22,7 @@ services:
       - key: ACCOUNT_SSO_BASE_URL
         value: https://account.inchframe.com
       - key: STUDIO_AUTH_MODE
-        value: hybrid
+        value: account
       - key: STUDIO_SSO_CLIENT_ID
         value: studio
       - key: STUDIO_SSO_CLIENT_SECRET

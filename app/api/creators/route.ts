@@ -11,11 +11,11 @@ function url(value:string){try{const parsed=new URL(value);return ['http:','http
 export async function POST(request:Request){
   const user=await getChatGPTUser();
   if(!user)return Response.json({error:'Sign in required.'},{status:401});
-  if(user.role!=='client')return Response.json({error:'Use a customer Account to apply.'},{status:403});
+  const existing=await getCreatorApplicationForUser(user),internalPartner=existing?.internal_partner===1;
+  if(user.role!=='client'&&!internalPartner)return Response.json({error:'Use a customer Account to apply.'},{status:403});
   if(request.headers.get('sec-fetch-site')==='cross-site')return Response.json({error:'Cross-site request rejected.'},{status:403});
   let form:FormData;
   try{form=await request.formData();}catch{return Response.json({error:'Invalid application.'},{status:400});}
-  const existing=await getCreatorApplicationForUser(user),internalPartner=existing?.internal_partner===1;
   if(!internalPartner&&(form.get('proConfirmed')!=='yes'||form.get('contractorConfirmed')!=='yes'||form.get('contactConfirmed')!=='yes'||form.get('verificationConfirmed')!=='yes'))
     return Response.json({error:'Confirm Paid Pro eligibility, subcontractor status, the contact policy, and verification requirements.'},{status:400});
   const displayName=text(form,'displayName',80),headline=text(form,'headline',120),bio=text(form,'bio',1200);
@@ -29,7 +29,7 @@ export async function POST(request:Request){
   if(existing&&existing.inchframe_email!==inchframeEmail)
     return Response.json({error:'The verified Inchframe account email cannot be changed on an existing Studio Partner profile.'},{status:400});
   const account=await getAccountSsoEligibility(user),accountLinked=account?.auth_source==='account';
-  if(accountLinked&&inchframeEmail!==user.email.toLowerCase())
+  if(accountLinked&&!internalPartner&&inchframeEmail!==user.email.toLowerCase())
     return Response.json({error:'The application email must match your verified Inchframe Account.'},{status:400});
   if(!existing&&!account?.studio_partner_eligible)return Response.json({error:'An active paid Pro Account with Studio Partner eligibility is required.'},{status:403});
   const samples=[];

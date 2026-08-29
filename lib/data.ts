@@ -154,6 +154,10 @@ export async function ensureSchema() {
       id TEXT PRIMARY KEY, creator_id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, sort_order INTEGER NOT NULL,
       FOREIGN KEY(creator_id) REFERENCES creator_profiles(id) ON DELETE CASCADE, UNIQUE(creator_id,sort_order)
     );
+    CREATE TABLE IF NOT EXISTS creator_profile_managers (
+      profile_id TEXT NOT NULL, email TEXT NOT NULL COLLATE NOCASE, created_at TEXT NOT NULL,
+      PRIMARY KEY(profile_id,email), FOREIGN KEY(profile_id) REFERENCES creator_profiles(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS project_quotes (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL UNIQUE, creator_id TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'awaiting_creator' CHECK(status IN ('awaiting_creator','awaiting_customer','admin_review','accepted','declined')),
@@ -261,6 +265,7 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_sso_login_transactions_expires ON sso_login_transactions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_creator_profiles_status_updated ON creator_profiles(status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_creator_samples_creator_sort ON creator_samples(creator_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_creator_profile_managers_email ON creator_profile_managers(email,profile_id);
     CREATE INDEX IF NOT EXISTS idx_projects_requested_creator ON projects(requested_creator_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_projects_assigned_creator ON projects(assigned_creator_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_project_quotes_creator_status ON project_quotes(creator_id, status, updated_at DESC);
@@ -327,6 +332,17 @@ export async function ensureSchema() {
       db.prepare(`UPDATE creator_profiles SET internal_partner=1,status='approved',pro_confirmed=1,pro_verified=0,identity_verified=0,tax_verified=0,
         pending_change_fields='[]',pending_change_at=NULL,reviewed_at=?,updated_at=? WHERE owner_email='support@inchframe.com' COLLATE NOCASE`).run(now,now);
       db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(supportPartnerMigration,now);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
+  const supportManagerMigration='support-house-manager-v1';
+  if(!db.prepare('SELECT 1 FROM schema_migrations WHERE key=?').get(supportManagerMigration)){
+    const now=new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      const support=db.prepare("SELECT id FROM creator_profiles WHERE owner_email='support@inchframe.com' COLLATE NOCASE").get() as {id:string}|undefined;
+      if(support)db.prepare('INSERT OR IGNORE INTO creator_profile_managers (profile_id,email,created_at) VALUES (?,?,?)').run(support.id,'cdaniel09@gmail.com',now);
+      db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(supportManagerMigration,now);
       db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
@@ -490,7 +506,8 @@ function creatorSlug(value:string){const normalized=value.toLowerCase().normaliz
 export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName:string;headline:string;bio:string;specialties:string;location:string;rateUnit:'project'|'day'|'hour';rateMin:number;rateMax:number;availability:string;inchframeEmail:string;samples:{title:string;url:string}[];avatarKey?:string;avatarMime?:string}) {
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
-  const existing=db.prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
+  const existing=db.prepare(`SELECT cp.* FROM creator_profiles cp WHERE cp.user_id=? OR EXISTS
+    (SELECT 1 FROM creator_profile_managers manager WHERE manager.profile_id=cp.id AND manager.email=? COLLATE NOCASE) LIMIT 1`).get(user.userId,user.email) as Omit<CreatorProfile,'samples'>|undefined;
   if(!existing&&!input.avatarKey)throw new Error('A profile icon is required.');
   const id=existing?.id||crypto.randomUUID();
   let slug=existing?.slug||creatorSlug(input.displayName);
@@ -512,7 +529,7 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
   const changedJson=JSON.stringify(changedFields.length?changedFields:['Profile resubmitted']);
   db.exec('BEGIN IMMEDIATE');
   try {
-    if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,pending_change_fields=?,pending_change_at=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(user.email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,id);
+    if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,pending_change_fields=?,pending_change_at=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(existing.owner_email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,id);
     else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,pro_confirmed,status,avatar_object_key,avatar_mime_type,pending_change_fields,pending_change_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,now);
     db.prepare('DELETE FROM creator_samples WHERE creator_id=?').run(id);
     const insert=db.prepare('INSERT INTO creator_samples (id,creator_id,title,url,sort_order) VALUES (?,?,?,?,?)');
@@ -524,7 +541,8 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
 
 export async function getCreatorApplicationForUser(user:ChatGPTUser) {
   await ensureSchema();
-  const profile=database().prepare('SELECT * FROM creator_profiles WHERE user_id=?').get(user.userId) as Omit<CreatorProfile,'samples'>|undefined;
+  const profile=database().prepare(`SELECT cp.* FROM creator_profiles cp WHERE cp.user_id=? OR EXISTS
+    (SELECT 1 FROM creator_profile_managers manager WHERE manager.profile_id=cp.id AND manager.email=? COLLATE NOCASE) ORDER BY cp.internal_partner DESC LIMIT 1`).get(user.userId,user.email) as Omit<CreatorProfile,'samples'>|undefined;
   return profile?withCreatorSamples(profile):null;
 }
 
