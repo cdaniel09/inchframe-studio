@@ -76,10 +76,12 @@ try{
   let result=await request('/login');
   assert(result.response.status===200&&result.text.includes('SIGN IN TO STUDIO')&&result.text.indexOf('SIGN IN TO STUDIO')<result.text.indexOf('INCHFRAME ACCOUNT')&&result.text.includes('Create a client account')&&!result.text.includes('Your session changed during the Studio deployment'),'Studio email/password is the default sign-in without deployment-specific session copy.');
   result=await request('/');
-  assert(result.response.status===200&&result.text.includes('href="/register"')&&result.text.includes('href="/studio-partners"')&&result.text.includes('inchframe-watermark-bug.png'),'Public project and Studio Partner calls to action use their required entry pages and the supplied logo appears in the header.');
+  assert(result.response.status===200&&result.text.includes('Studio is coming soon')&&result.text.includes('href="/register"')&&result.text.includes('href="/studio-partners"')&&result.text.includes('inchframe-watermark-bug.png'),'Public Studio pages show the pre-launch notice while keeping early project inquiry and Partner information routes available.');
   result=await request('/studio-partners');
-  assert(result.response.status===200&&result.text.includes('Find your production')&&result.text.includes('For clients')&&result.text.includes('For Partner candidates')&&result.text.includes('REQUIREMENTS TO APPLY')&&result.text.includes('Independent-contractor eligibility')&&result.text.includes('Client contact kept inside Studio'),'Studio Partner page serves clients and Partner candidates while stating application requirements.');
-  assert(result.text.includes('/api/auth/account/start?returnTo=%2Fportal%2Fstudio-partners&amp;intent=studio_partner'),'The first Partner action returns an existing Account session to the Partner dashboard.');
+  assert(result.response.status===200&&result.text.includes('Find your production')&&result.text.includes('For clients')&&result.text.includes('For future Partner candidates')&&result.text.includes('PLANNED REQUIREMENTS')&&result.text.includes('Partner applications opening later'),'Studio Partner page serves clients and clearly pauses new external Partner applications.');
+  assert(!result.text.includes('/api/auth/account/start?returnTo=%2Fportal%2Fstudio-partners&amp;intent=studio_partner'),'Closed Partner recruitment does not send public visitors into Account SSO.');
+  result=await request('/studio-partners/apply');
+  assert(result.response.status===200&&result.text.includes('Partner applications')&&result.text.includes('are opening later'),'The direct Partner application route presents the pre-launch pause without requiring sign-in.');
   result=await request('/register');
   assert(result.response.status===200&&result.text.includes('CREATE CLIENT ACCESS')&&result.text.includes('Create account'),'Native Studio client signup is available.');
   const invalidSignup=new FormData();invalidSignup.set('displayName','Test Client');invalidSignup.set('email','client@example.com');invalidSignup.set('password','short');
@@ -89,6 +91,8 @@ try{
   result=await request('/portal',{cookie:nativeAdmin});
   assert(result.response.status===200&&result.text.includes('Studio production desk'),'Email/password login creates a durable authenticated Studio session.');
   const chris=await signIn('chris','/portal/projects/test-project-chris');
+  result=await request('/api/creators',{cookie:chris,method:'POST',form:new FormData()});
+  assert(result.response.status===403&&result.text.includes('applications are paused'),'The API blocks a new external Partner application while recruitment is closed.');
   result=await request('/portal/projects/test-project-chris',{cookie:chris});
   assert(result.response.status===200&&result.text.includes('Edit project request'),'Chris can open an editable project request.');
   result=await request('/api/projects/test-project-chris/changes',{cookie:chris,method:'POST',json:{action:'submit',title:'Studio workflow test request — revised',projectType:'brand_film',brief:'Test the editable client project request, admin acceptance, and retained project history.',audience:'Inchframe customers and Studio clients',platforms:'Web, social, and launch page',dueDate:'2026-10-22',budgetRange:'2500_5000'}});
@@ -109,8 +113,8 @@ try{
   const support=await signIn('support','/studio-partners/apply','studio_partner');
   result=await request('/portal/studio-partners',{cookie:support});
   assert(result.response.status===200&&result.text.includes('Internal Partner active')&&result.text.includes('Project requests + assignments'),'Support starts as an active internal Partner.');
-  result=await request('/studio-partners');
-  assert(result.response.status===200&&result.text.includes('Inchframe Support Partner'),'Approved internal Support Partner appears in the public directory.');
+  result=await request('/studio-partners',{cookie:support});
+  assert(result.response.status===200&&result.text.includes('Inchframe Support Partner')&&result.text.includes('Open your Partner dashboard'),'Approved internal Support Partner remains visible and can enter its dashboard while recruitment is closed.');
   result=await request('/studio-partners/inchframe-support-partner');
   assert(result.response.status===200&&result.text.includes('Request this Studio Partner'),'Support has a public Partner profile and request path.');
   result=await request('/portal/projects/test-project-chris',{cookie:admin});

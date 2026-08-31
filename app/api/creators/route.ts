@@ -2,6 +2,7 @@ import {getChatGPTUser} from '@/app/chatgpt-auth';
 import {getAccountSsoEligibility,getCreatorApplicationForUser,saveCreatorApplication} from '@/lib/data';
 import {sendCreatorApplicationEmails} from '@/lib/email';
 import {deleteStoredFile,writeStoredFile} from '@/lib/storage';
+import {studioPartnerApplicationsOpen} from '@/lib/studio-launch';
 
 export const runtime='nodejs';
 const IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp']);
@@ -13,6 +14,7 @@ export async function POST(request:Request){
   if(!user)return Response.json({error:'Sign in required.'},{status:401});
   const existing=await getCreatorApplicationForUser(user),internalPartner=existing?.internal_partner===1;
   if(user.role!=='client'&&!internalPartner)return Response.json({error:'Use a customer Account to apply.'},{status:403});
+  if(!internalPartner&&!existing&&!studioPartnerApplicationsOpen())return Response.json({error:'New Studio Partner applications are paused while Studio completes payment and production setup.'},{status:403});
   if(request.headers.get('sec-fetch-site')==='cross-site')return Response.json({error:'Cross-site request rejected.'},{status:403});
   let form:FormData;
   try{form=await request.formData();}catch{return Response.json({error:'Invalid application.'},{status:400});}

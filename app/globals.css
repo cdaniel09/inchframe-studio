@@ -33,3 +33,6 @@
 
 /* Keep restricted-area display headings clear of their supporting copy. */
 .portal-title-row>div,.project-title-grid>div{min-width:0}.portal-title-row h1,.project-banner h1{max-width:100%;margin:0 0 24px;font-size:clamp(2.8rem,6vw,5.4rem);line-height:1;letter-spacing:-.065em;text-wrap:balance}.portal-title-row p:last-child,.project-title-grid>div>p:last-child{max-width:700px;margin:0;color:var(--muted);line-height:1.6}
+
+.launch-notice{border-top:1px solid rgba(156,242,31,.2);background:linear-gradient(90deg,rgba(156,242,31,.16),rgba(156,242,31,.06))}.launch-notice-inner{min-height:44px;display:flex;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:.78rem}.launch-notice strong,.launch-notice a{color:var(--green);font-weight:900}.launch-notice a{margin-left:auto}.button-disabled{opacity:.68;cursor:not-allowed;pointer-events:none;transform:none!important}
+@media(max-width:680px){.launch-notice-inner{padding:10px 0;justify-content:space-between;line-height:1.35}.launch-notice-inner span{display:none}.launch-notice a{margin-left:0;text-align:right}}

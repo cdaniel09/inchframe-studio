@@ -66,4 +66,6 @@ This single-instance disk design keeps initial cost and operations low. Move the
 
 Account SSO is the sole source of paid Pro Studio Partner eligibility. External applicants must sign in with a verified active Paid Pro Inchframe Account. Studio approval remains separate and does not automatically follow Account eligibility.
 
+Studio is currently in pre-launch mode. Early client inquiries remain open, while new external Studio Partner applications are disabled with `STUDIO_PARTNER_APPLICATIONS_OPEN=false` until payment, payout, verification, and production operations are ready. Existing internal or previously created Partner profiles can still use their restricted workflows.
+
 `support@inchframe.com` is provisioned as the Inchframe house production Partner. Once approved, it appears in the public Partner directory and uses the same request, quote, agreement, activity, review, and delivery workflow, while remaining exempt from independent-contractor verification requirements. `cdaniel09@gmail.com` is a shared profile manager with Studio admin authority: it can edit and review this internal profile, while Partner production actions continue to use the Support identity.
