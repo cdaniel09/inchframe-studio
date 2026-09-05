@@ -1,0 +1,12 @@
+# Public Studio pages and Partner profiles remain crawlable.
+# These crawler directives do not replace authentication or authorization.
+User-agent: *
+Allow: /
+Allow: /api/creator-icons/
+Disallow: /api
+Disallow: /portal
+Disallow: /start
+Disallow: /login
+Disallow: /register
+Disallow: /verify-email
+Disallow: /studio-partners/apply
