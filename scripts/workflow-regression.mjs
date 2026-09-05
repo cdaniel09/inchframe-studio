@@ -15,13 +15,22 @@ function identity(code){
   return null;
 }
 
+const grants=new Map();
 const mock=createServer((request,response)=>{
-  if(request.method!=='POST'||request.url!=='/api/sso/token'){response.writeHead(404).end();return;}
+  if(request.method!=='POST'||!['/api/sso/token','/api/sso/session'].includes(request.url)){response.writeHead(404).end();return;}
   let raw='';request.setEncoding('utf8');request.on('data',chunk=>raw+=chunk);request.on('end',()=>{
-    const payload=identity(new URLSearchParams(raw).get('code'));
+    const body=new URLSearchParams(raw);
+    if(request.url==='/api/sso/session'){
+      const account=grants.get(body.get('session_token'));
+      response.setHeader('content-type','application/json');
+      response.end(JSON.stringify(account?{active:true,account_id:account.user.id,roles:account.roles}:{active:false}));return;
+    }
+    const payload=identity(body.get('code'));
     response.setHeader('content-type','application/json');
     if(!payload){response.writeHead(400).end(JSON.stringify({error:'invalid_grant'}));return;}
-    response.end(JSON.stringify(payload));
+    const session_token=Buffer.from(body.get('code').padEnd(32,'_')).toString('base64url');
+    grants.set(session_token,payload);
+    response.end(JSON.stringify({...payload,session_token,session_expires_at:new Date(Date.now()+3600000).toISOString()}));
   });
 });
 
@@ -47,7 +56,9 @@ async function signIn(code,returnTo,intent='customer'){
   const authorize=new URL(start.headers.get('location'));
   const state=authorize.searchParams.get('state');
   if(!state)throw new Error(`SSO start omitted state for ${code}.`);
-  const callback=await fetch(`${base}/api/auth/account/callback?code=${code}&state=${encodeURIComponent(state)}`,{redirect:'manual'});
+  const binding=start.headers.getSetCookie().find(value=>value.startsWith('inchframe_studio_sso_state='))?.split(';',1)[0];
+  if(!binding)throw new Error('SSO start omitted browser binding.');
+  const callback=await fetch(`${base}/api/auth/account/callback?code=${code}&state=${encodeURIComponent(state)}`,{redirect:'manual',headers:{cookie:binding}});
   if(callback.status!==303)throw new Error(`SSO callback failed for ${code}: ${callback.status}`);
   return cookieFrom(callback);
 }

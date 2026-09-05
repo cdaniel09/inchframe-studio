@@ -1,6 +1,6 @@
 {
   "name": "inchframe-studio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -11,6 +11,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ignore-pattern .next",
+    "test:payments": "node scripts/payment-regression.cjs",
+    "test:auth": "node scripts/auth-regression.cjs",
+    "test:login": "node scripts/login-regression.cjs",
+    "test:uploads": "node scripts/upload-regression.cjs",
     "test:workflow": "node scripts/workflow-regression.mjs",
     "hash-password": "node scripts/hash-password.mjs"
   },

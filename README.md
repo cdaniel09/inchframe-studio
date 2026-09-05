@@ -1,5 +1,9 @@
 # Inchframe Studio
 
+Current release: **0.2.1** · workflow **11**. See the [changelog](CHANGELOG.md).
+
+Account-linked sign-in, revocable sessions and release behavior: [Security follow-up](SECURITY_FOLLOWUP_2026-09-04.md).
+
 The Inchframe Studio sales site and private client production portal. It runs as a standard Next.js Node application and stores its SQLite database and uploaded media on a persistent disk.
 
 ## Customer flow

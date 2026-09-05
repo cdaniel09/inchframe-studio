@@ -10,6 +10,7 @@
 !/.env.example
 next-env.d.ts
 *.log
+*.tsbuildinfo
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

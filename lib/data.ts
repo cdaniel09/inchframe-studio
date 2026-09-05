@@ -3,6 +3,7 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import {inspectAccountSession} from '@/lib/account-session';
 import type { ChatGPTUser } from '@/app/chatgpt-auth';
 
 export type StudioProject = {
@@ -45,8 +46,13 @@ export type StudioSsoTransaction = {
 export type CreatorSample={id:string;creator_id:string;title:string;url:string;sort_order:number};
 export type CreatorProfile={id:string;user_id:string;owner_email:string;display_name:string;slug:string;headline:string;bio:string;specialties:string;location:string;rate_unit:'project'|'day'|'hour';rate_min:number;rate_max:number;availability:string;inchframe_email:string;pro_confirmed:number;pro_verified:number;identity_verified:number;tax_verified:number;internal_partner:number;status:'pending'|'approved'|'declined';avatar_object_key:string;avatar_mime_type:string;pending_change_fields:string;pending_change_at:string|null;created_at:string;updated_at:string;reviewed_at:string|null;samples:CreatorSample[]};
 export type ProjectEssentials={title:string;projectType:string;brief:string;audience:string;platforms:string;dueDate:string|null;budgetRange:string};
-export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
+export type ProjectQuote={id:string;project_id:string;creator_id:string;status:'awaiting_creator'|'awaiting_customer'|'admin_review'|'accepted'|'declined';amount_cents:number;deposit_cents:number;counter_count:number;checkout_version:number;expires_at:string|null;latest_actor:'creator'|'client'|'admin'|'';latest_note:string;stripe_checkout_session_id:string|null;stripe_payment_intent_id:string|null;deposit_paid_at:string|null;created_at:string;updated_at:string};
 export type QuoteOffer={id:string;quote_id:string;actor_id:string;actor_role:'creator'|'client';amount_cents:number;note:string;created_at:string};
+export type ProjectCheckoutAttempt={
+  id:string;project_id:string;quote_id:string;quote_version:number;owner_id:string;creator_id:string;
+  quote_amount_cents:number;amount_cents:number;currency:string;request_json:string;session_id:string|null;
+  status:'creating'|'open'|'paid'|'expired';created_at:string;paid_at:string|null;
+};
 export type ProjectQuoteBundle={quote:ProjectQuote;offers:QuoteOffer[];creator:CreatorProfile};
 export type ProjectAgreement={id:string;project_id:string;version:number;status:'draft'|'pending_client'|'changes_requested'|'active'|'completed';goal:string;scope:string;deliverables:string;out_of_scope:string;start_date:string|null;target_date:string|null;milestones:string;revision_rounds:number;communication_method:string;response_expectation:string;client_responsibilities:string;creator_responsibilities:string;final_delivery:string;change_policy:string;creator_accepted_at:string|null;client_accepted_at:string|null;completed_at:string|null;updated_by_id:string;created_at:string;updated_at:string};
 export type ProjectActivity={id:string;project_id:string;author_id:string;author_email:string;author_role:'creator'|'client'|'admin';kind:'message'|'progress'|'milestone'|'decision'|'blocker'|'delivery';title:string;body:string;next_step:string;needs_response_from:'none'|'creator'|'client'|'admin';target_date:string|null;resolved_at:string|null;resolved_by_id:string|null;created_at:string};
@@ -72,11 +78,11 @@ function database() {
   return db;
 }
 
-function columns(table:'users'|'projects'|'creator_profiles') {
+function columns(table:'users'|'projects'|'creator_profiles'|'sessions'|'upload_reservations') {
   return new Set((database().prepare(`PRAGMA table_info(${table})`).all() as unknown as {name:string}[]).map(column=>column.name));
 }
 
-function addColumn(table:'users'|'projects'|'creator_profiles', existing:Set<string>, name:string, definition:string) {
+function addColumn(table:'users'|'projects'|'creator_profiles'|'sessions'|'upload_reservations', existing:Set<string>, name:string, definition:string) {
   if(existing.has(name)) return false;
   database().exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
   existing.add(name);
@@ -127,6 +133,12 @@ export async function ensureSchema() {
       author_email TEXT NOT NULL, decision TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS upload_reservations (
+      id TEXT PRIMARY KEY, project_id TEXT, owner_id TEXT NOT NULL, byte_size INTEGER NOT NULL,
+      file_count INTEGER NOT NULL, created_at TEXT NOT NULL, object_keys TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE INDEX IF NOT EXISTS upload_reservations_owner ON upload_reservations(owner_id);
+    CREATE INDEX IF NOT EXISTS upload_reservations_project ON upload_reservations(project_id);
     CREATE TABLE IF NOT EXISTS request_limits (
       key TEXT PRIMARY KEY, action TEXT NOT NULL, window_started INTEGER NOT NULL, request_count INTEGER NOT NULL
     );
@@ -206,6 +218,31 @@ export async function ensureSchema() {
     );
   `);
 
+  if(!(db.prepare('PRAGMA table_info(project_quotes)').all() as {name:string}[]).some(column=>column.name==='checkout_version'))
+    db.exec('ALTER TABLE project_quotes ADD COLUMN checkout_version INTEGER NOT NULL DEFAULT 0');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_checkout_attempts (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, quote_id TEXT NOT NULL,
+      quote_version INTEGER NOT NULL, owner_id TEXT NOT NULL, creator_id TEXT NOT NULL,
+      quote_amount_cents INTEGER NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL,
+      request_json TEXT NOT NULL, session_id TEXT UNIQUE,
+      status TEXT NOT NULL DEFAULT 'creating' CHECK(status IN ('creating','open','paid','expired')),
+      created_at TEXT NOT NULL, paid_at TEXT,
+      FOREIGN KEY(quote_id) REFERENCES project_quotes(id) ON DELETE RESTRICT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_checkout_active_quote ON project_checkout_attempts(quote_id,quote_version)
+      WHERE status IN ('creating','open');
+    CREATE TRIGGER IF NOT EXISTS quote_checkout_version
+      AFTER UPDATE OF creator_id,amount_cents,deposit_cents,status ON project_quotes
+      WHEN OLD.creator_id!=NEW.creator_id OR OLD.amount_cents!=NEW.amount_cents
+        OR OLD.deposit_cents!=NEW.deposit_cents OR OLD.status!=NEW.status
+      BEGIN
+        UPDATE project_quotes SET checkout_version=OLD.checkout_version+1,stripe_checkout_session_id=NULL WHERE id=NEW.id;
+      END;
+  `);
+
+  addColumn('upload_reservations',columns('upload_reservations'),'object_keys',"TEXT NOT NULL DEFAULT '[]'");
+  addColumn('sessions',columns('sessions'),'account_session_token','TEXT');
   const userColumns=columns('users');
   addColumn('users',userColumns,'email_verified_at','TEXT');
   addColumn('users',userColumns,'verification_token_hash','TEXT');
@@ -295,6 +332,19 @@ export async function ensureSchema() {
     } catch(error) {db.exec('ROLLBACK');throw error;}
   }
 
+  const accountAuthMigration='account-linked-credentials-v1';
+  if(!db.prepare('SELECT 1 FROM schema_migrations WHERE key=?').get(accountAuthMigration)){
+    const now=new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      // Previously linked rows may retain a password chosen before email ownership was verified.
+      db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE account_user_id IS NOT NULL OR auth_source='account')").run();
+      db.prepare("UPDATE users SET password_hash='',verification_token_hash=NULL,verification_expires_at=NULL,sessions_revoked_at=? WHERE account_user_id IS NOT NULL OR auth_source='account'").run(now);
+      db.prepare('INSERT INTO schema_migrations (key,applied_at) VALUES (?,?)').run(accountAuthMigration,now);
+      db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+  }
+
   const workflowFixtures='studio-workflow-fixtures-v1';
   if(!db.prepare('SELECT 1 FROM schema_migrations WHERE key=?').get(workflowFixtures)){
     const now=new Date().toISOString();
@@ -356,25 +406,33 @@ export function isStudioAdmin(user: ChatGPTUser | string) {
   return configured.includes(user.toLowerCase());
 }
 
-export async function createStudioSessionRecord(tokenHash:string,user:ChatGPTUser,expiresAt:string) {
+export async function createStudioSessionRecord(tokenHash:string,user:ChatGPTUser,expiresAt:string,accountSessionToken?:string) {
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
   db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(now);
-  db.prepare('INSERT INTO sessions (token_hash,user_id,email,display_name,full_name,role,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(tokenHash,user.userId,user.email,user.displayName,user.fullName,user.role,expiresAt,now);
+  db.prepare('INSERT INTO sessions (token_hash,user_id,email,display_name,full_name,role,expires_at,created_at,account_session_token) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(tokenHash,user.userId,user.email,user.displayName,user.fullName,user.role,expiresAt,now,accountSessionToken||null);
 }
 
 export async function findStudioSession(tokenHash:string):Promise<ChatGPTUser|null> {
   await ensureSchema();
   const now=new Date().toISOString();
-  const row=database().prepare('SELECT user_id,email,display_name,full_name,role FROM sessions WHERE token_hash=? AND expires_at>?').get(tokenHash,now) as {user_id:string;email:string;display_name:string;full_name:string|null;role:'admin'|'client'}|undefined;
+  const row=database().prepare('SELECT user_id,email,display_name,full_name,role,created_at,account_session_token FROM sessions WHERE token_hash=? AND expires_at>?').get(tokenHash,now) as {user_id:string;email:string;display_name:string;full_name:string|null;role:'admin'|'client';created_at:string;account_session_token:string|null}|undefined;
   if(!row) return null;
-  const account=database().prepare('SELECT studio_access_status FROM users WHERE id=?').get(row.user_id) as {studio_access_status:string}|undefined;
+  const account=database().prepare('SELECT studio_access_status,account_user_id,auth_source FROM users WHERE id=?').get(row.user_id) as {studio_access_status:string;account_user_id:string|null;auth_source:string}|undefined;
   if(account?.studio_access_status==='suspended') {
     database().prepare('DELETE FROM sessions WHERE user_id=?').run(row.user_id);
     return null;
   }
-  return {userId:row.user_id,email:row.email,displayName:row.display_name,fullName:row.full_name,role:row.role};
+  if(account?.account_user_id||account?.auth_source==='account'){
+    const status=await inspectAccountSession(row.account_session_token||'');
+    if(!status)return null; // Account outage: deny access, retain the session for retry.
+    if(!status.active||status.account_id!==account.account_user_id||(row.role==='admin'&&!status.roles?.includes('studio_admin'))){
+      database().prepare('DELETE FROM sessions WHERE token_hash=?').run(tokenHash);
+      return null;
+    }
+  }
+  return validateStudioSessionUser({userId:row.user_id,email:row.email,displayName:row.display_name,fullName:row.full_name,role:row.role},Date.parse(row.created_at));
 }
 
 export async function validateStudioSessionUser(user:ChatGPTUser,issuedAt:number):Promise<ChatGPTUser|null> {
@@ -383,7 +441,7 @@ export async function validateStudioSessionUser(user:ChatGPTUser,issuedAt:number
   const row=database().prepare(`SELECT id,email,display_name,studio_access_status,sessions_revoked_at,studio_admin_claim
     FROM users WHERE id=?`).get(user.userId) as {id:string;email:string;display_name:string;studio_access_status:string;sessions_revoked_at:string|null;studio_admin_claim:number}|undefined;
   if(!row||row.studio_access_status!=='active')return null;
-  if(row.sessions_revoked_at&&new Date(row.sessions_revoked_at).getTime()>=issuedAt)return null;
+  if(row.sessions_revoked_at&&new Date(row.sessions_revoked_at).getTime()>issuedAt)return null;
   const admin=row.studio_admin_claim===1||isStudioAdmin(row.email);
   if(user.role==='admin'&&!admin)return null;
   return {userId:row.id,email:row.email,displayName:row.display_name,fullName:row.display_name,role:admin?'admin':'client'};
@@ -425,8 +483,13 @@ export async function upsertAccountSsoUser(identity:AccountSsoIdentity):Promise<
     let account=db.prepare('SELECT * FROM users WHERE account_user_id=?').get(identity.id) as StudioAccount|undefined;
     if(!account)account=db.prepare('SELECT * FROM users WHERE email=? COLLATE NOCASE').get(email) as StudioAccount|undefined;
     if(account) {
+      if(account.account_user_id&&account.account_user_id!==identity.id)throw new Error('This Studio account is linked to a different Account identity.');
       if(account.studio_access_status==='suspended')throw new Error('Studio access is suspended. Contact Inchframe support.');
-      db.prepare(`UPDATE users SET account_user_id=?,email=?,display_name=?,email_verified_at=COALESCE(email_verified_at,?),
+      if(!account.account_user_id||account.password_hash){
+        db.prepare('DELETE FROM sessions WHERE user_id=?').run(account.id);
+      }
+      db.prepare(`UPDATE users SET password_hash='',verification_token_hash=NULL,verification_expires_at=NULL,
+        account_user_id=?,email=?,display_name=?,email_verified_at=COALESCE(email_verified_at,?),
         auth_source='account',account_tier=?,subscription_status=?,studio_partner_eligible=?,
         studio_partner_invite_id=?,studio_partner_invite_expires_at=?,studio_admin_claim=?,last_login_at=? WHERE id=?`)
         .run(identity.id,email,displayName,now,identity.tier,identity.subscriptionStatus,identity.studioPartnerEligible?1:0,
@@ -506,6 +569,8 @@ function creatorSlug(value:string){const normalized=value.toLowerCase().normaliz
 export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName:string;headline:string;bio:string;specialties:string;location:string;rateUnit:'project'|'day'|'hour';rateMin:number;rateMax:number;availability:string;inchframeEmail:string;samples:{title:string;url:string}[];avatarKey?:string;avatarMime?:string}) {
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try {
   const existing=db.prepare(`SELECT cp.* FROM creator_profiles cp WHERE cp.user_id=? OR EXISTS
     (SELECT 1 FROM creator_profile_managers manager WHERE manager.profile_id=cp.id AND manager.email=? COLLATE NOCASE) LIMIT 1`).get(user.userId,user.email) as Omit<CreatorProfile,'samples'>|undefined;
   if(!existing&&!input.avatarKey)throw new Error('A profile icon is required.');
@@ -527,16 +592,14 @@ export async function saveCreatorApplication(user:ChatGPTUser,input:{displayName
     if(input.avatarKey)changedFields.push('Profile icon');
   }else changedFields.push('New Partner application');
   const changedJson=JSON.stringify(changedFields.length?changedFields:['Profile resubmitted']);
-  db.exec('BEGIN IMMEDIATE');
-  try {
     if(existing)db.prepare(`UPDATE creator_profiles SET owner_email=?,display_name=?,headline=?,bio=?,specialties=?,location=?,rate_unit=?,rate_min=?,rate_max=?,availability=?,inchframe_email=?,pro_confirmed=1,status='pending',avatar_object_key=?,avatar_mime_type=?,pending_change_fields=?,pending_change_at=?,updated_at=?,reviewed_at=NULL WHERE id=?`).run(existing.owner_email,input.displayName,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,id);
     else db.prepare(`INSERT INTO creator_profiles (id,user_id,owner_email,display_name,slug,headline,bio,specialties,location,rate_unit,rate_min,rate_max,availability,inchframe_email,pro_confirmed,status,avatar_object_key,avatar_mime_type,pending_change_fields,pending_change_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?,?,?,?)`).run(id,user.userId,user.email,input.displayName,slug,input.headline,input.bio,input.specialties,input.location,input.rateUnit,input.rateMin,input.rateMax,input.availability,input.inchframeEmail,avatarKey,avatarMime,changedJson,now,now,now);
     db.prepare('DELETE FROM creator_samples WHERE creator_id=?').run(id);
     const insert=db.prepare('INSERT INTO creator_samples (id,creator_id,title,url,sort_order) VALUES (?,?,?,?,?)');
     input.samples.slice(0,5).forEach((sample,index)=>insert.run(crypto.randomUUID(),id,sample.title,sample.url,index));
     db.exec('COMMIT');
+    return {id,slug,oldAvatarKey:existing?.avatar_object_key||null};
   } catch(error){db.exec('ROLLBACK');throw error;}
-  return {id,slug,oldAvatarKey:existing?.avatar_object_key||null};
 }
 
 export async function getCreatorApplicationForUser(user:ChatGPTUser) {
@@ -596,14 +659,15 @@ export async function checkRateLimit(action:string,identifier:string,limit:numbe
   const key=createHash('sha256').update(`${action}:${identifier}`).digest('hex');
   const now=Date.now();
   const db=database();
-  const row=db.prepare('SELECT window_started,request_count FROM request_limits WHERE key=?').get(key) as {window_started:number;request_count:number}|undefined;
-  if(!row || now-row.window_started>=windowMs) {
-    db.prepare('INSERT INTO request_limits (key,action,window_started,request_count) VALUES (?,?,?,1) ON CONFLICT(key) DO UPDATE SET action=excluded.action,window_started=excluded.window_started,request_count=1').run(key,action,now);
-    return true;
-  }
-  if(row.request_count>=limit) return false;
-  db.prepare('UPDATE request_limits SET request_count=request_count+1 WHERE key=?').run(key);
-  return true;
+  // One reservation statement prevents separate workers passing a stale count.
+  const result=db.prepare(`
+    INSERT INTO request_limits (key,action,window_started,request_count) VALUES (?,?,?,1)
+    ON CONFLICT(key) DO UPDATE SET
+      window_started=CASE WHEN window_started<=? THEN excluded.window_started ELSE window_started END,
+      request_count=CASE WHEN window_started<=? THEN 1 ELSE request_count+1 END
+    WHERE window_started<=? OR request_count<?
+  `).run(key,action,now,now-windowMs,now-windowMs,now-windowMs,limit);
+  return Number(result.changes)===1;
 }
 
 export async function createStudioAccount(input:{email:string;displayName:string;passwordHash:string;verificationTokenHash:string;verificationExpiresAt:string}) {
@@ -1018,25 +1082,109 @@ export async function declineProjectQuote(projectId:string,user:ChatGPTUser){
   const row=db.prepare(`SELECT q.id,q.deposit_paid_at,p.owner_id,cp.user_id creator_user_id FROM project_quotes q JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`).get(projectId) as {id:string;deposit_paid_at:string|null;owner_id:string;creator_user_id:string}|undefined;
   if(!row||(!isStudioAdmin(user)&&row.owner_id!==user.userId&&row.creator_user_id!==user.userId))throw new Error('You cannot decline this quote.');
   if(row.deposit_paid_at)throw new Error('A funded assignment cannot be closed as a quote. Contact the Studio for cancellation or refund review.');
+  if(db.prepare("SELECT 1 FROM project_checkout_attempts WHERE quote_id=? AND status IN ('creating','open')").get(row.id)
+    ||db.prepare('SELECT 1 FROM project_quotes WHERE id=? AND stripe_checkout_session_id IS NOT NULL').get(row.id))
+    throw new Error('Payment has started. Contact Studio to reconcile it before changing the quote.');
   db.prepare(`UPDATE project_quotes SET status='declined',latest_actor=?,updated_at=? WHERE id=?`).run(isStudioAdmin(user)?'admin':row.owner_id===user.userId?'client':'creator',now,row.id);
   db.prepare(`UPDATE projects SET status='quote_declined',assigned_creator_id=NULL,updated_at=? WHERE id=?`).run(now,projectId);
 }
 
-export async function recordCheckoutSession(projectId:string,user:ChatGPTUser,sessionId:string){
-  await ensureSchema();
-  const result=database().prepare(`UPDATE project_quotes SET stripe_checkout_session_id=?,updated_at=? WHERE project_id=? AND status='accepted' AND deposit_paid_at IS NULL AND EXISTS (SELECT 1 FROM projects p WHERE p.id=project_quotes.project_id AND p.owner_id=?)`).run(sessionId,new Date().toISOString(),projectId,user.userId);
-  return result.changes===1;
-}
-
-export async function markProjectDepositPaid(input:{projectId:string;quoteId:string;checkoutSessionId:string;paymentIntentId:string|null}){
+export async function prepareProjectCheckout(projectId:string,user:ChatGPTUser):Promise<ProjectCheckoutAttempt>{
   await ensureSchema();
   const db=database(),now=new Date().toISOString();
   db.exec('BEGIN IMMEDIATE');
   try{
-    const result=db.prepare(`UPDATE project_quotes SET deposit_paid_at=COALESCE(deposit_paid_at,?),stripe_checkout_session_id=?,stripe_payment_intent_id=?,updated_at=? WHERE id=? AND project_id=? AND status='accepted'`).run(now,input.checkoutSessionId,input.paymentIntentId,now,input.quoteId,input.projectId);
-    if(result.changes===1)db.prepare(`UPDATE projects SET status='advanced_intake',advanced_unlocked_at=COALESCE(advanced_unlocked_at,?),updated_at=? WHERE id=?`).run(now,now,input.projectId);
+    const quote=db.prepare(`SELECT q.*,p.owner_id,p.title,cp.display_name creator_name FROM project_quotes q
+      JOIN projects p ON p.id=q.project_id JOIN creator_profiles cp ON cp.id=q.creator_id WHERE q.project_id=?`)
+      .get(projectId) as (ProjectQuote&{owner_id:string;title:string;creator_name:string})|undefined;
+    if(!quote||quote.owner_id!==user.userId)throw new Error('Project not found.');
+    if(quote.status!=='accepted'||quote.deposit_paid_at)throw new Error('This quote is not available for payment.');
+    if(!Number.isSafeInteger(quote.deposit_cents)||quote.deposit_cents<=0||quote.deposit_cents>quote.amount_cents)
+      throw new Error('The quote payment amount needs Studio review.');
+    const current=db.prepare("SELECT * FROM project_checkout_attempts WHERE quote_id=? AND quote_version=? AND status IN ('creating','open')")
+      .get(quote.id,quote.checkout_version) as ProjectCheckoutAttempt|undefined;
+    if(current){
+      // Stripe retains idempotency keys for at least 24h; an ambiguous older creation must be reconciled.
+      if(current.status==='creating'&&Date.now()-Date.parse(current.created_at)>23*60*60*1000)
+        throw new Error('This pending payment needs Studio review before retrying.');
+      db.exec('COMMIT');return current;
+    }
+    if(quote.stripe_checkout_session_id)throw new Error('The existing payment needs Studio review before starting another.');
+    const id=crypto.randomUUID(),full=quote.deposit_cents===quote.amount_cents;
+    const metadata={project_id:projectId,quote_id:quote.id,checkout_attempt_id:id,quote_version:String(quote.checkout_version),payment_kind:full?'full':'deposit'};
+    const origin=process.env.NEXT_PUBLIC_SITE_URL?.trim()||'http://localhost:3000';
+    const params={
+      mode:'payment',customer_email:user.email,billing_address_collection:'auto',
+      line_items:[{quantity:1,price_data:{currency:'usd',unit_amount:quote.deposit_cents,
+        product_data:{name:`${quote.title} — ${full?'project payment':'production deposit'}`,description:`${quote.creator_name} through Inchframe Studio`}}}],
+      invoice_creation:{enabled:true},metadata,
+      payment_intent_data:{metadata,transfer_group:`project_${projectId}`},
+      success_url:new URL(`/portal/projects/${encodeURIComponent(projectId)}?payment=success`,origin).toString(),
+      cancel_url:new URL(`/portal/projects/${encodeURIComponent(projectId)}?payment=cancelled`,origin).toString(),
+    };
+    db.prepare(`INSERT INTO project_checkout_attempts
+      (id,project_id,quote_id,quote_version,owner_id,creator_id,quote_amount_cents,amount_cents,currency,request_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?,'usd',?,?)`).run(id,projectId,quote.id,quote.checkout_version,user.userId,quote.creator_id,quote.amount_cents,quote.deposit_cents,JSON.stringify(params),now);
+    const attempt=db.prepare('SELECT * FROM project_checkout_attempts WHERE id=?').get(id) as ProjectCheckoutAttempt;
+    db.exec('COMMIT');return attempt;
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function bindProjectCheckout(attemptId:string,sessionId:string){
+  await ensureSchema();
+  const db=database();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const attempt=db.prepare('SELECT * FROM project_checkout_attempts WHERE id=?').get(attemptId) as ProjectCheckoutAttempt|undefined;
+    if(!attempt||attempt.status==='expired'||(attempt.session_id&&attempt.session_id!==sessionId))throw new Error('Payment session does not match its attempt.');
+    const quote=db.prepare('SELECT * FROM project_quotes WHERE id=?').get(attempt.quote_id) as ProjectQuote|undefined;
+    if(!quote||quote.status!=='accepted'||quote.checkout_version!==attempt.quote_version
+      ||quote.amount_cents!==attempt.quote_amount_cents||quote.deposit_cents!==attempt.amount_cents||quote.creator_id!==attempt.creator_id)
+      throw new Error('The quote changed before payment could start.');
+    db.prepare("UPDATE project_checkout_attempts SET session_id=?,status=CASE WHEN status='paid' THEN 'paid' ELSE 'open' END WHERE id=?").run(sessionId,attemptId);
+    db.prepare('UPDATE project_quotes SET stripe_checkout_session_id=? WHERE id=?').run(sessionId,quote.id);
     db.exec('COMMIT');
-    return result.changes===1;
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function expireProjectCheckout(attemptId:string,sessionId:string){
+  await ensureSchema();
+  const db=database();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const result=db.prepare("UPDATE project_checkout_attempts SET status='expired' WHERE id=? AND session_id=? AND status='open'").run(attemptId,sessionId);
+    if(result.changes)db.prepare('UPDATE project_quotes SET stripe_checkout_session_id=NULL WHERE stripe_checkout_session_id=?').run(sessionId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+export async function markProjectDepositPaid(input:{attemptId:string;projectId:string;quoteId:string;quoteVersion:string;checkoutSessionId:string;paymentIntentId:string|null;amountTotal:number|null;currency:string|null}){
+  await ensureSchema();
+  const db=database(),now=new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const attempt=db.prepare('SELECT * FROM project_checkout_attempts WHERE id=?').get(input.attemptId) as ProjectCheckoutAttempt|undefined;
+    if(!attempt||attempt.status==='expired'||attempt.project_id!==input.projectId||attempt.quote_id!==input.quoteId
+      ||String(attempt.quote_version)!==input.quoteVersion||attempt.amount_cents!==input.amountTotal||attempt.currency!==input.currency
+      ||!input.paymentIntentId||!input.checkoutSessionId||(attempt.session_id&&attempt.session_id!==input.checkoutSessionId))
+      throw new Error('Paid checkout does not match its saved payment attempt.');
+    const quote=db.prepare('SELECT * FROM project_quotes WHERE id=?').get(attempt.quote_id) as ProjectQuote|undefined;
+    if(!quote||quote.status!=='accepted'||quote.checkout_version!==attempt.quote_version
+      ||quote.amount_cents!==attempt.quote_amount_cents||quote.deposit_cents!==attempt.amount_cents||quote.creator_id!==attempt.creator_id)
+      throw new Error('Paid checkout refers to a changed quote; Studio review is required.');
+    if(quote.deposit_paid_at){
+      if(quote.stripe_checkout_session_id!==input.checkoutSessionId||quote.stripe_payment_intent_id!==input.paymentIntentId)
+        throw new Error('Another payment already funded this quote.');
+      db.exec('COMMIT');return true;
+    }
+    const project=db.prepare('SELECT owner_id,status FROM projects WHERE id=?').get(attempt.project_id) as {owner_id:string;status:string}|undefined;
+    if(!project||project.owner_id!==attempt.owner_id||project.status!=='deposit_required')
+      throw new Error('Project is not waiting for this payment; Studio review is required.');
+    db.prepare("UPDATE project_checkout_attempts SET session_id=?,status='paid',paid_at=? WHERE id=?").run(input.checkoutSessionId,now,attempt.id);
+    db.prepare('UPDATE project_quotes SET deposit_paid_at=?,stripe_checkout_session_id=?,stripe_payment_intent_id=?,updated_at=? WHERE id=?')
+      .run(now,input.checkoutSessionId,input.paymentIntentId,now,quote.id);
+    db.prepare("UPDATE projects SET status='advanced_intake',advanced_unlocked_at=COALESCE(advanced_unlocked_at,?),updated_at=? WHERE id=?").run(now,now,attempt.project_id);
+    db.exec('COMMIT');return true;
   }catch(error){db.exec('ROLLBACK');throw error;}
 }
 
@@ -1069,6 +1217,70 @@ export async function saveAdvancedIntake(projectId:string,user:ChatGPTUser,input
   const now=new Date().toISOString();
   const result=database().prepare(`UPDATE projects SET advanced_brief=?,must_have=?,avoid_notes=?,reference_links=?,audio_notes=?,aspect_ratios=?,style_notes=?,status='production_ready',updated_at=? WHERE id=? AND owner_id=? AND advanced_unlocked_at IS NOT NULL`).run(input.advancedBrief,input.mustHave,input.avoidNotes,input.referenceLinks,input.audioNotes,JSON.stringify(input.aspectRatios),input.styleNotes,now,projectId,user.userId);
   return result.changes===1;
+}
+
+
+export class UploadQuotaError extends Error {}
+function quotaBytes(name:string,fallbackMb:number){
+  const raw=process.env[name];
+  if(raw!==undefined&&(!/^\d+$/.test(raw)||Number(raw)<1||Number(raw)>1048576))
+    throw new Error(`Invalid ${name} configuration.`);
+  return Number(raw??fallbackMb)*1024*1024;
+}
+export async function reserveUploadStorage(projectId:string|null,ownerId:string,bytes:number,fileCount:number,availableBytes:number){
+  await ensureSchema();
+  if(!Number.isSafeInteger(bytes)||bytes<=0||!Number.isInteger(fileCount)||fileCount<1)throw new UploadQuotaError('Choose a nonempty file.');
+  const db=database(),id=crypto.randomUUID();
+  const globalLimit=quotaBytes('STUDIO_STORAGE_LIMIT_MB',400),ownerLimit=quotaBytes('STUDIO_OWNER_STORAGE_LIMIT_MB',300),projectLimit=quotaBytes('STUDIO_PROJECT_STORAGE_LIMIT_MB',200);
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const sum=(sql:string,...args:(string|number)[])=>Number((db.prepare(sql).get(...args) as {n:number}).n);
+    const pending=sum('SELECT COALESCE(SUM(byte_size),0) n FROM upload_reservations');
+    // Existing profile icons are conservatively charged their maximum allowed size.
+    const used=sum('SELECT COALESCE(SUM(byte_size),0) n FROM assets')+sum("SELECT COUNT(*)*3145728 n FROM creator_profiles WHERE avatar_object_key<>''");
+    const owned=sum('SELECT COALESCE(SUM(a.byte_size),0) n FROM assets a JOIN projects p ON p.id=a.project_id WHERE p.owner_id=?',ownerId)
+      +sum('SELECT COALESCE(SUM(byte_size),0) n FROM upload_reservations WHERE owner_id=?',ownerId)
+      +sum("SELECT COUNT(*)*3145728 n FROM creator_profiles WHERE user_id=? AND avatar_object_key<>''",ownerId);
+    if(used+pending+bytes>globalLimit||availableBytes<pending+bytes+512*1024*1024)
+      throw new UploadQuotaError('Studio storage is currently full. Contact Studio before uploading more.');
+    if(owned+bytes>ownerLimit)throw new UploadQuotaError('Your project storage limit has been reached. Contact Studio for more space.');
+    if(projectId){
+      const projectBytes=sum('SELECT COALESCE(SUM(byte_size),0) n FROM assets WHERE project_id=?',projectId)
+        +sum('SELECT COALESCE(SUM(byte_size),0) n FROM upload_reservations WHERE project_id=?',projectId);
+      const count=sum('SELECT COUNT(*) n FROM assets WHERE project_id=?',projectId)
+        +sum('SELECT COALESCE(SUM(file_count),0) n FROM upload_reservations WHERE project_id=?',projectId);
+      if(projectBytes+bytes>projectLimit||count+fileCount>1000)throw new UploadQuotaError('This project has reached its media limit. Contact Studio for more space.');
+    }
+    db.prepare('INSERT INTO upload_reservations (id,project_id,owner_id,byte_size,file_count,created_at) VALUES (?,?,?,?,?,?)')
+      .run(id,projectId,ownerId,bytes,fileCount,new Date().toISOString());
+    db.exec('COMMIT');return id;
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+export async function setUploadReservationObjects(id:string,keys:string[]){
+  await ensureSchema();
+  if(!database().prepare('UPDATE upload_reservations SET object_keys=? WHERE id=?').run(JSON.stringify(keys),id).changes)throw new Error('Upload reservation is missing.');
+}
+export async function releaseUploadStorage(id:string){
+  await ensureSchema();database().prepare('DELETE FROM upload_reservations WHERE id=?').run(id);
+}
+type NewAsset={kind:string;objectKey:string;filename:string;mimeType:string;byteSize:number;label:string};
+export async function addAssetBatch(user:ChatGPTUser,projectId:string,inputs:NewAsset[],reservationId:string){
+  await ensureSchema();const db=database(),now=new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    const reservation=db.prepare('SELECT project_id,byte_size,file_count FROM upload_reservations WHERE id=?').get(reservationId) as {project_id:string;byte_size:number;file_count:number}|undefined;
+    if(!reservation||reservation.project_id!==projectId||reservation.byte_size!==inputs.reduce((sum,file)=>sum+file.byteSize,0)||reservation.file_count!==inputs.length)
+      throw new Error('Upload reservation does not match this batch.');
+    const insert=db.prepare('INSERT INTO assets (id,project_id,uploaded_by_id,uploaded_by_email,kind,object_key,filename,mime_type,byte_size,label,version,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    for(const input of inputs){
+      const v=db.prepare('SELECT COALESCE(MAX(version),0) n FROM assets WHERE project_id=? AND kind=?').get(projectId,input.kind) as {n:number};
+      insert.run(crypto.randomUUID(),projectId,user.userId,user.email,input.kind,input.objectKey,input.filename,input.mimeType,input.byteSize,input.label,v.n+1,['seed','audio'].includes(input.kind)?'uploaded':'in_review',now);
+    }
+    if(inputs.some(input=>!['seed','audio'].includes(input.kind)))db.prepare("UPDATE projects SET updated_at=?,status='client_review' WHERE id=?").run(now,projectId);
+    else db.prepare('UPDATE projects SET updated_at=? WHERE id=?').run(now,projectId);
+    db.prepare('DELETE FROM upload_reservations WHERE id=?').run(reservationId);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
 }
 
 export async function addAsset(user:ChatGPTUser,projectId:string,input:{kind:string;objectKey:string;filename:string;mimeType:string;byteSize:number;label:string}) {

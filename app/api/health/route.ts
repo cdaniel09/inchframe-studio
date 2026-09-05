@@ -1,3 +1,4 @@
+import {version} from '@/package.json';
 import {ensureSchema} from '@/lib/data';
 import {uploadRoot} from '@/lib/storage';
 import {studioAuthMode,studioSsoConfigured} from '@/lib/account-sso';
@@ -19,7 +20,7 @@ export async function GET(){
     return Response.json({ok:false,error:'Studio configuration is incomplete.',missing},{status:503});
   try{
     await ensureSchema();
-    return Response.json({ok:true,storage:uploadRoot(),email:'configured',authentication:{mode,accountSso:studioSsoConfigured()?'configured':'unavailable',sessionVersion:2,navigation:'fresh-request'},launch:{status:studioComingSoon()?'coming_soon':'live',partnerApplications:studioPartnerApplicationsOpen()?'open':'closed'},workflowVersion:10});
+    return Response.json({ok:true,version,storage:uploadRoot(),email:'configured',authentication:{mode,accountSso:studioSsoConfigured()?'configured':'unavailable',sessionVersion:3,navigation:'fresh-request'},launch:{status:studioComingSoon()?'coming_soon':'live',partnerApplications:studioPartnerApplicationsOpen()?'open':'closed'},workflowVersion:11});
   }catch(error){
     console.error('Health check failed',error);
     return Response.json({ok:false,error:'Storage is unavailable.'},{status:503});

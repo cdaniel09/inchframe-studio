@@ -2,7 +2,7 @@ import 'server-only';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import {createStudioSessionRecord,deleteStudioSession,findStudioSession,validateStudioSessionUser} from '@/lib/data';
+import {createStudioSessionRecord,deleteStudioSession,findStudioSession} from '@/lib/data';
 import { createOpaqueToken,hashToken } from '@/lib/tokens';
 
 export type ChatGPTUser={userId:string;displayName:string;email:string;fullName:string|null;role:'admin'|'client'};
@@ -47,8 +47,8 @@ export async function getChatGPTUser():Promise<ChatGPTUser|null>{
   for(const cookie of cookieStore.getAll(SIGNED_COOKIE_NAME)){
     const session=decodeSignedSession(cookie.value);
     if(!session)continue;
-    const user=await validateStudioSessionUser(session.user,session.issuedAt);
-    if(user)return user;
+    const user=await findStudioSession(hashToken(session.sid));
+    if(user&&user.userId===session.user.userId)return user;
   }
   const values=[
     ...cookieStore.getAll(COOKIE_NAME).map(cookie=>cookie.value),
@@ -61,9 +61,9 @@ export async function getChatGPTUser():Promise<ChatGPTUser|null>{
   return null;
 }
 
-export async function createStudioSession(user:ChatGPTUser){
+export async function createStudioSession(user:ChatGPTUser,accountSessionToken?:string){
   const sid=createOpaqueToken();
-  await createStudioSessionRecord(hashToken(sid),user,new Date(Date.now()+MAX_AGE*1000).toISOString());
+  await createStudioSessionRecord(hashToken(sid),user,new Date(Date.now()+MAX_AGE*1000).toISOString(),accountSessionToken);
   const cookieStore=await cookies();
   cookieStore.set(SIGNED_COOKIE_NAME,encodeSignedSession(user,sid),{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'lax',path:'/',maxAge:MAX_AGE});
   cookieStore.set(COOKIE_NAME,'',{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'lax',path:'/',maxAge:0});

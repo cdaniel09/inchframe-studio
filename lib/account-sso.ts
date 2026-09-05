@@ -3,6 +3,8 @@ import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {consumeStudioSsoTransaction,createStudioSsoTransaction,type AccountSsoIdentity,upsertAccountSsoUser} from '@/lib/data';
 import {hashToken} from '@/lib/tokens';
 
+export const STUDIO_SSO_STATE_COOKIE='inchframe_studio_sso_state';
+
 export type StudioSsoIntent='customer'|'studio_partner';
 
 function setting(name:string,fallback=''){
@@ -43,9 +45,10 @@ function constantTimeEqual(left:string,right:string){
   return a.length===b.length&&timingSafeEqual(a,b);
 }
 
-export async function finishAccountAuthorization(code:string,state:string){
+export async function finishAccountAuthorization(code:string,state:string,browserState:string){
   if(!studioSsoConfigured())throw new Error('Account sign-in is not configured.');
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(state)||!code)throw new Error('The Account sign-in request is invalid or expired.');
+  if(!browserState||!constantTimeEqual(state,browserState))throw new Error('Start Account sign-in in this browser.');
   const calculated=hashToken(state);
   const transaction=await consumeStudioSsoTransaction(calculated);
   if(!transaction||!constantTimeEqual(transaction.state_hash,calculated))throw new Error('The Account sign-in request is invalid or expired.');
@@ -70,7 +73,7 @@ export async function finishAccountAuthorization(code:string,state:string){
     throw new Error('Inchframe Account could not complete sign-in. Please try again.');
   }
   const payload=await response.json().catch(()=>null) as {
-    error?:string;error_description?:string;
+    error?:string;error_description?:string;session_token?:string;session_expires_at?:string;
     user?:{id?:string;email?:string;email_verified?:boolean;display_name?:string};
     roles?:unknown;
     entitlements?:{tier?:unknown;subscription_status?:unknown;studio_partner_eligible?:unknown;studio_partner_invite_id?:unknown;studio_partner_invite_expires_at?:unknown};
@@ -79,6 +82,8 @@ export async function finishAccountAuthorization(code:string,state:string){
   const source=payload?.user,entitlements=payload?.entitlements;
   if(!source?.id||!source.email||source.email_verified!==true||!source.display_name||!Array.isArray(payload?.roles)||!entitlements)
     throw new Error('Inchframe Account returned an incomplete identity.');
+  if(typeof payload.session_token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(payload.session_token)||!payload.session_expires_at||!(Date.parse(payload.session_expires_at)>Date.now()))
+    throw new Error('Inchframe Account did not provide a revocable session.');
   const tier=entitlements.tier==='creator'||entitlements.tier==='pro'?entitlements.tier:null;
   const identity:AccountSsoIdentity={
     id:source.id,email:source.email,emailVerified:true,displayName:source.display_name,
@@ -89,5 +94,5 @@ export async function finishAccountAuthorization(code:string,state:string){
     studioPartnerInviteExpiresAt:typeof entitlements.studio_partner_invite_expires_at==='string'?entitlements.studio_partner_invite_expires_at:null,
   };
   const user=await upsertAccountSsoUser(identity);
-  return {user,returnTo:transaction.return_to,intent:transaction.intent,identity};
+  return {user,returnTo:transaction.return_to,intent:transaction.intent,identity,accountSessionToken:payload.session_token};
 }

@@ -18,7 +18,7 @@ function resolveObjectKey(objectKey: string) {
 export async function writeStoredFile(objectKey: string, value: Uint8Array) {
   const target = resolveObjectKey(objectKey);
   await mkdir(path.dirname(target), {recursive: true});
-  await writeFile(target, value);
+  await writeFile(target, value, {flag:'wx'});
 }
 
 export async function readStoredFile(objectKey: string) {

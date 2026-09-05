@@ -17,6 +17,12 @@ services:
         value: /var/data/inchframe-studio.sqlite
       - key: UPLOAD_DIR
         value: /var/data/uploads
+      - key: STUDIO_STORAGE_LIMIT_MB
+        value: 400
+      - key: STUDIO_OWNER_STORAGE_LIMIT_MB
+        value: 300
+      - key: STUDIO_PROJECT_STORAGE_LIMIT_MB
+        value: 200
       - key: AUTH_SECRET
         generateValue: true
       - key: ACCOUNT_SSO_BASE_URL

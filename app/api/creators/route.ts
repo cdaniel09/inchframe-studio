@@ -1,7 +1,8 @@
 import {getChatGPTUser} from '@/app/chatgpt-auth';
-import {getAccountSsoEligibility,getCreatorApplicationForUser,saveCreatorApplication} from '@/lib/data';
+import {checkRateLimit,getAccountSsoEligibility,getCreatorApplicationForUser,saveCreatorApplication,reserveUploadStorage,releaseUploadStorage,setUploadReservationObjects} from '@/lib/data';
 import {sendCreatorApplicationEmails} from '@/lib/email';
 import {deleteStoredFile,writeStoredFile} from '@/lib/storage';
+import {freeUploadBytes,readUploadForm,withUploadSlot} from '@/lib/upload-request';
 import {studioPartnerApplicationsOpen} from '@/lib/studio-launch';
 
 export const runtime='nodejs';
@@ -16,8 +17,9 @@ export async function POST(request:Request){
   if(user.role!=='client'&&!internalPartner)return Response.json({error:'Use a customer Account to apply.'},{status:403});
   if(!internalPartner&&!existing&&!studioPartnerApplicationsOpen())return Response.json({error:'New Studio Partner applications are paused while Studio completes payment and production setup.'},{status:403});
   if(request.headers.get('sec-fetch-site')==='cross-site')return Response.json({error:'Cross-site request rejected.'},{status:403});
-  let form:FormData;
-  try{form=await request.formData();}catch{return Response.json({error:'Invalid application.'},{status:400});}
+  if(!await checkRateLimit('profile-upload',user.userId,20,3600000))return Response.json({error:'Too many profile updates. Please try again in an hour.'},{status:429,headers:{'retry-after':'3600'}});
+  return withUploadSlot(async()=>{
+  const form=await readUploadForm(request,3*1024*1024+64*1024);
   if(!internalPartner&&(form.get('proConfirmed')!=='yes'||form.get('contractorConfirmed')!=='yes'||form.get('contactConfirmed')!=='yes'||form.get('verificationConfirmed')!=='yes'))
     return Response.json({error:'Confirm Paid Pro eligibility, subcontractor status, the contact policy, and verification requirements.'},{status:400});
   const displayName=text(form,'displayName',80),headline=text(form,'headline',120),bio=text(form,'bio',1200);
@@ -41,24 +43,37 @@ export async function POST(request:Request){
     if(title&&sampleUrl)samples.push({title,url:sampleUrl});
   }
   const avatar=form.get('avatar');
-  let avatarKey:string|undefined,avatarMime:string|undefined;
+  let avatarKey:string|undefined,avatarMime:string|undefined,reservation:string|undefined;
+  let committed=false;
+  try{
   if(avatar instanceof File&&avatar.size>0){
     if(!IMAGE_TYPES.has(avatar.type)||avatar.size>3*1024*1024)
       return Response.json({error:'Profile icon must be a JPG, PNG, or WebP no larger than 3 MB.'},{status:400});
     const extension=avatar.type==='image/png'?'png':avatar.type==='image/webp'?'webp':'jpg';
     avatarKey=`creators/${user.userId}/${crypto.randomUUID()}.${extension}`;
     avatarMime=avatar.type;
+    reservation=await reserveUploadStorage(null,existing?.user_id||user.userId,avatar.size,1,await freeUploadBytes());
+    await setUploadReservationObjects(reservation,[avatarKey,...(existing?.avatar_object_key?[existing.avatar_object_key]:[])]);
     await writeStoredFile(avatarKey,new Uint8Array(await avatar.arrayBuffer()));
   }
-  try{
     const result=await saveCreatorApplication(user,{displayName,headline,bio,specialties,location,availability,inchframeEmail,
       rateUnit:rateUnit as 'project'|'day'|'hour',rateMin,rateMax,samples,avatarKey,avatarMime});
-    if(avatarKey&&result.oldAvatarKey&&result.oldAvatarKey!==avatarKey)await deleteStoredFile(result.oldAvatarKey);
+    committed=true;
+    if(reservation&&avatarKey)await setUploadReservationObjects(reservation,[avatarKey,...(result.oldAvatarKey?[result.oldAvatarKey]:[])]);
+    let cleaned=true;
+    if(avatarKey&&result.oldAvatarKey&&result.oldAvatarKey!==avatarKey){
+      try{await deleteStoredFile(result.oldAvatarKey);}catch{cleaned=false;console.error('Old profile icon cleanup needs review; reservation retained',reservation);}
+    }
+    if(reservation&&cleaned)await releaseUploadStorage(reservation);
     try{await sendCreatorApplicationEmails({email:user.email,displayName,profileId:result.id,updated:Boolean(existing),internalPartner});}
     catch(error){console.error('Studio Partner application email failed',error);}
     return Response.json({id:result.id},{status:201});
   }catch(error){
-    if(avatarKey)await deleteStoredFile(avatarKey);
+    if(!committed&&avatarKey){
+      try{await deleteStoredFile(avatarKey);if(reservation)await releaseUploadStorage(reservation);}
+      catch{console.error('Profile icon cleanup needs review; reservation retained',reservation);}
+    }
     throw error;
   }
+  });
 }
